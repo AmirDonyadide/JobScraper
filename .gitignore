@@ -219,3 +219,6 @@ __marimo__/
 
 
 .DS_Store
+
+# Generated scraper output
+jobs_*.xlsx

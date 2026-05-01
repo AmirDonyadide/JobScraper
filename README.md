@@ -3,6 +3,8 @@
 Scrapes LinkedIn jobs daily across 29 geo/GIS-related keywords,
 deduplicates results, and exports a clean Excel file per day.
 
+Uses Apify actor `curious_coder/linkedin-jobs-scraper`.
+
 ---
 
 ## Files
@@ -99,9 +101,12 @@ Add this line (runs at 8am daily):
 All settings are at the top of `linkedin_job_scraper.py`:
 
 ```python
-MAX_RESULTS_PER_JOB_TYPE = 100  # increase for more results (uses more credits)
+MAX_RESULTS_PER_KEYWORD = 100  # increase for more results (uses more credits)
 CONTRACT_TYPES = ["F", "P", "I"]  # full-time, part-time, internship
 LOCATION = "Germany"
+GEO_ID = "101282230"
+SCRAPE_COMPANY_DETAILS = True
+USE_INCOGNITO_MODE = True
 DELAY_BETWEEN_REQUESTS = 3
 OUTPUT_FILE = f"jobs_{datetime.now().strftime('%Y-%m-%d')}.xlsx"
 ```
@@ -113,5 +118,6 @@ To change location, edit `LOCATION`.
 
 ## Apify usage
 
-Pricing depends on the actor and your Apify account. The default setup runs
-29 keywords × 3 job types, so check your Apify Console before increasing limits.
+The selected actor is priced per result. The default setup runs 29 keyword
+searches with up to 100 jobs each, so check your Apify Console before
+increasing limits.

@@ -22,6 +22,7 @@ from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
 from datetime import datetime
 from pathlib import Path
+from urllib.parse import urlencode
 
 # ─────────────────────────────────────────────
 #  CONFIGURATION — edit these
@@ -65,11 +66,12 @@ def load_apify_token() -> str:
 
 APIFY_API_TOKEN = load_apify_token()
 
-# Apify actor for LinkedIn Jobs (scraper)
-ACTOR_ID = "curious_coder/linkedin-jobs-scraper"
+# Apify actor for LinkedIn Jobs (Curious Coder scraper)
+# Apify's raw REST API uses "~" between username and actor name.
+ACTOR_ID = "curious_coder~linkedin-jobs-scraper"
 
-# Max jobs to fetch per keyword/job type pair (increase if you want more, costs more credits)
-MAX_RESULTS_PER_JOB_TYPE = 100
+# Max jobs to fetch per keyword (increase if you want more, costs more credits)
+MAX_RESULTS_PER_KEYWORD = 100
 
 # Seconds to wait between keyword requests (be polite to the API)
 DELAY_BETWEEN_REQUESTS = 3
@@ -78,16 +80,20 @@ DELAY_BETWEEN_REQUESTS = 3
 OUTPUT_FILE = f"jobs_{datetime.now().strftime('%Y-%m-%d')}.xlsx"
 
 # ─────────────────────────────────────────────
-#  SEARCH FILTERS (Apify actor input parameters)
+#  SEARCH FILTERS (LinkedIn URL parameters)
 # ─────────────────────────────────────────────
-# publishedAt=r86400  -> Posted in last 24 hours
-# experienceLevel=1   -> Entry level
-# contractType options: F=Full-time, P=Part-time, I=Internship
+# f_TPR=r86400 -> Posted in last 24 hours
+# f_E=1        -> Entry level
+# f_JT values  -> F=Full-time, P=Part-time, I=Internship
 
 LOCATION = "Germany"
+GEO_ID = "101282230"
 PUBLISHED_AT = "r86400"
 EXPERIENCE_LEVEL = "1"
 CONTRACT_TYPES = ["F", "P", "I"]
+SCRAPE_COMPANY_DETAILS = True
+USE_INCOGNITO_MODE = True
+SPLIT_BY_LOCATION = False
 
 # ─────────────────────────────────────────────
 #  KEYWORDS
@@ -153,27 +159,36 @@ def apify_error_message(response: requests.Response) -> str:
     return str(data)[:500]
 
 
-def build_actor_input(keyword: str, contract_type: str) -> dict:
-    return {
-        "title": keyword,
+def build_search_url(keyword: str) -> str:
+    params = {
+        "keywords": keyword,
         "location": LOCATION,
-        "publishedAt": PUBLISHED_AT,
-        "rows": MAX_RESULTS_PER_JOB_TYPE,
-        "experienceLevel": EXPERIENCE_LEVEL,
-        "contractType": contract_type,
-        "proxy": {
-            "useApifyProxy": True,
-            "apifyProxyGroups": ["RESIDENTIAL"],
-        },
+        "geoId": GEO_ID,
+        "f_TPR": PUBLISHED_AT,
+        "f_E": EXPERIENCE_LEVEL,
+        "f_JT": ",".join(CONTRACT_TYPES),
+        "position": "1",
+        "pageNum": "0",
+    }
+    return f"https://www.linkedin.com/jobs/search/?{urlencode(params)}"
+
+
+def build_actor_input(keyword: str) -> dict:
+    return {
+        "urls": [build_search_url(keyword)],
+        "count": MAX_RESULTS_PER_KEYWORD,
+        "scrapeCompany": SCRAPE_COMPANY_DETAILS,
+        "useIncognitoMode": USE_INCOGNITO_MODE,
+        "splitByLocation": SPLIT_BY_LOCATION,
     }
 
 
 def run_actor(payload: dict) -> list[dict]:
     url = f"https://api.apify.com/v2/acts/{ACTOR_ID}/run-sync-get-dataset-items"
     params = {
-        "timeout": 120,
+        "timeout": 300,
         "memory": 512,
-        "maxItems": MAX_RESULTS_PER_JOB_TYPE,
+        "maxItems": MAX_RESULTS_PER_KEYWORD,
     }
 
     response = requests.post(
@@ -188,8 +203,8 @@ def run_actor(payload: dict) -> list[dict]:
         message = apify_error_message(response)
         raise ApifyConfigurationError(
             "Apify rejected the request. Check that APIFY_API_TOKEN is valid, "
-            f"that your account can run {ACTOR_ID}, and that the actor/proxy "
-            f"subscription is active. Apify said: {message}"
+            f"that your account can run {ACTOR_ID}, and that billing/trial "
+            f"access is active. Apify said: {message}"
         )
 
     response.raise_for_status()
@@ -209,15 +224,16 @@ def fetch_jobs_for_keyword(keyword: str) -> list[dict]:
     Calls the Apify LinkedIn Jobs Scraper actor synchronously
     and returns a list of job dicts for the given keyword.
     """
-    jobs = []
     try:
-        for contract_type in CONTRACT_TYPES:
-            payload = build_actor_input(keyword, contract_type)
-            jobs.extend(run_actor(payload))
-        return jobs
+        return run_actor(build_actor_input(keyword))
     except requests.exceptions.Timeout:
         print(f"  ⚠ Timeout for keyword '{keyword}' — skipping.")
         return []
+    except requests.exceptions.ConnectionError as e:
+        raise ApifyConfigurationError(
+            f"Could not connect to Apify API while searching '{keyword}'. "
+            f"Check your internet connection/DNS and try again. Details: {e}"
+        ) from e
     except ApifyConfigurationError:
         raise
     except requests.exceptions.HTTPError as e:
@@ -436,8 +452,9 @@ def main():
 
     print("=" * 60)
     print(f"  LinkedIn Job Scraper — {datetime.now().strftime('%Y-%m-%d %H:%M')}")
+    print(f"  Actor: {ACTOR_ID}")
     print(f"  Keywords: {len(KEYWORDS)}  |  Job types: {', '.join(CONTRACT_TYPES)}")
-    print(f"  Max results per keyword/job type: {MAX_RESULTS_PER_JOB_TYPE}")
+    print(f"  Max results per keyword: {MAX_RESULTS_PER_KEYWORD}")
     print("=" * 60)
 
     all_results:   dict[str, list] = {}
@@ -450,7 +467,7 @@ def main():
             jobs = fetch_jobs_for_keyword(keyword)
         except ApifyConfigurationError as e:
             print(f"\n❌ {e}")
-            print("   Fix the Apify token/subscription, then run the script again.")
+            print("   Fix the issue above, then run the script again.")
             return
 
         all_results[keyword] = jobs
