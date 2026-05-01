@@ -3,25 +3,28 @@ LinkedIn Job Scraper
 ====================
 Uses Apify's LinkedIn Jobs Scraper actor to search for jobs
 across multiple keywords with predefined filters, then deduplicates
-and exports results to a Google Sheet in your Google Drive.
+and exports results locally, to Google Sheets, or both.
 
 Requirements:
     pip install -r requirements.txt
 
 Usage:
     1. Put APIFY_API_TOKEN in .env (or set it as an environment variable)
-    2. Put Google OAuth credentials in google_client_secret.json
+    2. Set OUTPUT_MODE below: excel, google_sheets, or both
     3. Run: python linkedin_job_scraper.py
-    4. Open the Google Sheet URL printed at the end
+    4. Open the printed output path or Google Sheet URL
 """
 
 import json
 import os
 import time
 import requests
+import openpyxl
 from datetime import datetime
 from pathlib import Path
 from urllib.parse import urlencode
+from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+from openpyxl.utils import get_column_letter
 
 # ─────────────────────────────────────────────
 #  CONFIGURATION — edit these
@@ -32,9 +35,13 @@ TOKEN_FILE = Path(__file__).with_name(".env")
 TOKEN_PLACEHOLDER = "apify_api_XXXXXXXXXXXX"
 GOOGLE_CLIENT_SECRET_FILE = Path(__file__).with_name("google_client_secret.json")
 GOOGLE_TOKEN_FILE = Path(__file__).with_name("google_token.json")
+GOOGLE_SPREADSHEET_ID_FILE = Path(__file__).with_name("google_spreadsheet_id.txt")
+GOOGLE_SPREADSHEET_ID = os.environ.get("GOOGLE_SPREADSHEET_ID", "").strip()
 GOOGLE_SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets",
 ]
+RUN_STARTED_AT = datetime.now()
+RUN_SHEET_NAME = RUN_STARTED_AT.strftime("%Y-%m-%d %H-%M-%S")
 
 
 def load_apify_token() -> str:
@@ -80,8 +87,14 @@ MAX_RESULTS_PER_SEARCH = 500
 # Seconds to wait between keyword requests (be polite to the API)
 DELAY_BETWEEN_REQUESTS = 3
 
+# Choose: "excel", "google_sheets", or "both"
+OUTPUT_MODE = os.environ.get("JOBSCRAPER_OUTPUT_MODE", "excel").strip().lower()
+
+# Local Excel output path
+EXCEL_OUTPUT_FILE = Path(__file__).with_name("jobs.xlsx")
+
 # Output Google Sheet title
-SPREADSHEET_TITLE = f"LinkedIn Jobs {datetime.now().strftime('%Y-%m-%d')}"
+SPREADSHEET_TITLE = "jobs"
 
 # ─────────────────────────────────────────────
 #  SEARCH FILTERS (LinkedIn URL parameters)
@@ -442,6 +455,124 @@ def make_job_rows(jobs: list[dict]) -> list[list]:
     return rows
 
 
+def unique_name(existing_names: set[str], base_name: str, max_length: int | None = None) -> str:
+    name = base_name[:max_length] if max_length else base_name
+    if name not in existing_names:
+        return name
+
+    counter = 2
+    while True:
+        suffix = f" ({counter})"
+        if max_length:
+            candidate = f"{base_name[:max_length - len(suffix)]}{suffix}"
+        else:
+            candidate = f"{base_name}{suffix}"
+        if candidate not in existing_names:
+            return candidate
+        counter += 1
+
+
+# ─────────────────────────────────────────────
+#  EXCEL EXPORT
+# ─────────────────────────────────────────────
+
+COLOR_HEADER_BG = "102C53"
+COLOR_HEADER_FG = "FFFFFF"
+COLOR_ROW_ODD = "CADCFC"
+COLOR_ROW_EVEN = "FFFFFF"
+COLOR_ACCENT = "C9A84C"
+
+THIN = Side(style="thin", color="AAAAAA")
+BORDER = Border(left=THIN, right=THIN, top=THIN, bottom=THIN)
+
+
+def style_header_cell(cell):
+    cell.font = Font(bold=True, color=COLOR_HEADER_FG, name="Calibri", size=11)
+    cell.fill = PatternFill("solid", fgColor=COLOR_HEADER_BG)
+    cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    cell.border = BORDER
+
+
+def style_data_cell(cell, row_idx: int, is_url: bool = False):
+    bg = COLOR_ROW_ODD if row_idx % 2 == 1 else COLOR_ROW_EVEN
+    cell.fill = PatternFill("solid", fgColor=bg)
+    cell.alignment = Alignment(vertical="top", wrap_text=True)
+    cell.border = BORDER
+    if is_url:
+        cell.font = Font(color=COLOR_ACCENT, name="Calibri", size=10, underline="single")
+    else:
+        cell.font = Font(name="Calibri", size=10)
+
+
+def parse_hyperlink_formula(value: str):
+    prefix = '=HYPERLINK("'
+    separator = '", "'
+    suffix = '")'
+    if not isinstance(value, str) or not value.startswith(prefix) or not value.endswith(suffix):
+        return None
+
+    body = value[len(prefix):-len(suffix)]
+    if separator not in body:
+        return None
+
+    url, label = body.split(separator, 1)
+    return url.replace('""', '"'), label.replace('""', '"')
+
+
+def excel_value(value):
+    parsed = parse_hyperlink_formula(value)
+    if parsed:
+        return parsed[1]
+    return value
+
+
+def export_to_excel(jobs: list[dict], filename: Path) -> str:
+    if filename.exists():
+        wb = openpyxl.load_workbook(filename)
+        sheet_name = unique_name(set(wb.sheetnames), RUN_SHEET_NAME, 31)
+        ws = wb.create_sheet(sheet_name)
+    else:
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = unique_name(set(), RUN_SHEET_NAME, 31)
+
+    job_rows = make_job_rows(jobs)
+    for row in job_rows:
+        ws.append([excel_value(value) for value in row])
+
+    for cell in ws[1]:
+        style_header_cell(cell)
+    ws.row_dimensions[1].height = 30
+
+    url_columns = {16, 17, 18}
+    for row_idx in range(2, ws.max_row + 1):
+        ws.row_dimensions[row_idx].height = 60
+        for col_idx in range(1, ws.max_column + 1):
+            cell = ws.cell(row=row_idx, column=col_idx)
+            style_data_cell(cell, row_idx, is_url=col_idx in url_columns)
+            parsed = parse_hyperlink_formula(job_rows[row_idx - 1][col_idx - 1])
+            if parsed:
+                cell.hyperlink = parsed[0]
+
+    for col_idx in range(1, ws.max_column + 1):
+        ws.column_dimensions[get_column_letter(col_idx)].width = 18
+    ws.column_dimensions["B"].width = 40
+    ws.column_dimensions["C"].width = 28
+    ws.column_dimensions["D"].width = 24
+    ws.column_dimensions["O"].width = 32
+    ws.column_dimensions["V"].width = 80
+
+    ws.freeze_panes = "A2"
+    ws.auto_filter.ref = ws.dimensions
+
+    wb.save(filename)
+    return f"{filename} (sheet: {ws.title})"
+
+
+# ─────────────────────────────────────────────
+#  GOOGLE SHEETS EXPORT
+# ─────────────────────────────────────────────
+
 def build_google_sheets_service():
     try:
         from google.auth.transport.requests import Request
@@ -490,13 +621,12 @@ def update_values(service, spreadsheet_id: str, sheet_name: str, rows: list[list
     ).execute()
 
 
-def format_spreadsheet(service, spreadsheet_id: str, sheet_ids: dict[str, int], job_row_count: int):
-    jobs_sheet_id = sheet_ids["Jobs"]
+def format_spreadsheet(service, spreadsheet_id: str, sheet_id: int, job_row_count: int):
     requests_body = [
         {
             "updateSheetProperties": {
                 "properties": {
-                    "sheetId": jobs_sheet_id,
+                    "sheetId": sheet_id,
                     "gridProperties": {"frozenRowCount": 1},
                 },
                 "fields": "gridProperties.frozenRowCount",
@@ -505,7 +635,7 @@ def format_spreadsheet(service, spreadsheet_id: str, sheet_ids: dict[str, int], 
         {
             "repeatCell": {
                 "range": {
-                    "sheetId": jobs_sheet_id,
+                    "sheetId": sheet_id,
                     "startRowIndex": 0,
                     "endRowIndex": 1,
                 },
@@ -526,7 +656,7 @@ def format_spreadsheet(service, spreadsheet_id: str, sheet_ids: dict[str, int], 
             "setBasicFilter": {
                 "filter": {
                     "range": {
-                        "sheetId": jobs_sheet_id,
+                        "sheetId": sheet_id,
                         "startRowIndex": 0,
                         "endRowIndex": max(job_row_count, 1),
                         "startColumnIndex": 0,
@@ -538,7 +668,7 @@ def format_spreadsheet(service, spreadsheet_id: str, sheet_ids: dict[str, int], 
         {
             "autoResizeDimensions": {
                 "dimensions": {
-                    "sheetId": jobs_sheet_id,
+                    "sheetId": sheet_id,
                     "dimension": "COLUMNS",
                     "startIndex": 0,
                     "endIndex": len(HEADER),
@@ -553,43 +683,103 @@ def format_spreadsheet(service, spreadsheet_id: str, sheet_ids: dict[str, int], 
     ).execute()
 
 
-def export_to_google_sheets(service, jobs: list[dict], zero_searches: list[str], search_count: int) -> str:
-    jobs_sheet_name = f"Jobs {datetime.now().strftime('%Y-%m-%d')}"
-    spreadsheet = service.spreadsheets().create(
-        body={
-            "properties": {"title": SPREADSHEET_TITLE},
-            "sheets": [
-                {"properties": {"title": jobs_sheet_name}},
-                {"properties": {"title": "Summary"}},
-                {"properties": {"title": "No Results"}},
-            ],
-        },
+def read_google_spreadsheet_id() -> str:
+    if GOOGLE_SPREADSHEET_ID:
+        return GOOGLE_SPREADSHEET_ID
+    if GOOGLE_SPREADSHEET_ID_FILE.exists():
+        return GOOGLE_SPREADSHEET_ID_FILE.read_text(encoding="utf-8").strip()
+    return ""
+
+
+def get_google_spreadsheet(service, spreadsheet_id: str) -> dict:
+    return service.spreadsheets().get(
+        spreadsheetId=spreadsheet_id,
         fields="spreadsheetId,spreadsheetUrl,sheets(properties(sheetId,title))",
     ).execute()
 
-    spreadsheet_id = spreadsheet["spreadsheetId"]
-    sheet_ids = {
-        sheet["properties"]["title"]: sheet["properties"]["sheetId"]
-        for sheet in spreadsheet["sheets"]
+
+def create_google_spreadsheet(service) -> tuple[dict, str, int]:
+    spreadsheet = service.spreadsheets().create(
+        body={
+            "properties": {"title": SPREADSHEET_TITLE},
+            "sheets": [{"properties": {"title": RUN_SHEET_NAME}}],
+        },
+        fields="spreadsheetId,spreadsheetUrl,sheets(properties(sheetId,title))",
+    ).execute()
+    GOOGLE_SPREADSHEET_ID_FILE.write_text(spreadsheet["spreadsheetId"], encoding="utf-8")
+    sheet_id = spreadsheet["sheets"][0]["properties"]["sheetId"]
+    return spreadsheet, RUN_SHEET_NAME, sheet_id
+
+
+def add_google_run_sheet(service, spreadsheet_id: str, existing_names: set[str]) -> tuple[str, int]:
+    sheet_name = unique_name(existing_names, RUN_SHEET_NAME)
+    response = service.spreadsheets().batchUpdate(
+        spreadsheetId=spreadsheet_id,
+        body={
+            "requests": [
+                {
+                    "addSheet": {
+                        "properties": {"title": sheet_name},
+                    }
+                }
+            ]
+        },
+    ).execute()
+    sheet_id = response["replies"][0]["addSheet"]["properties"]["sheetId"]
+    return sheet_name, sheet_id
+
+
+def get_or_create_google_run_sheet(service) -> tuple[str, str, str, int]:
+    spreadsheet_id = read_google_spreadsheet_id()
+    if not spreadsheet_id:
+        spreadsheet, sheet_name, sheet_id = create_google_spreadsheet(service)
+        return spreadsheet["spreadsheetId"], spreadsheet["spreadsheetUrl"], sheet_name, sheet_id
+
+    try:
+        spreadsheet = get_google_spreadsheet(service, spreadsheet_id)
+    except Exception as e:
+        raise GoogleSheetsExportError(
+            f"Could not open Google spreadsheet ID '{spreadsheet_id}'. "
+            f"Check {GOOGLE_SPREADSHEET_ID_FILE.name}, or delete it to create a new 'jobs' spreadsheet. "
+            f"Details: {e}"
+        ) from e
+
+    existing_names = {
+        sheet["properties"]["title"]
+        for sheet in spreadsheet.get("sheets", [])
     }
-    sheet_ids["Jobs"] = sheet_ids[jobs_sheet_name]
+    sheet_name, sheet_id = add_google_run_sheet(service, spreadsheet_id, existing_names)
+    return spreadsheet_id, spreadsheet["spreadsheetUrl"], sheet_name, sheet_id
 
+
+def export_to_google_sheets(service, jobs: list[dict]) -> str:
+    spreadsheet_id, spreadsheet_url, sheet_name, sheet_id = get_or_create_google_run_sheet(service)
     job_rows = make_job_rows(jobs)
-    summary_rows = [
-        ["Run date", datetime.now().strftime("%Y-%m-%d %H:%M")],
-        ["Searches run", search_count],
-        ["Unique jobs found", len(jobs)],
-        ["Searches with 0 results", len(zero_searches)],
-        ["Actor", ACTOR_ID],
-    ]
-    no_result_rows = [["Search", "Status"]] + [[label, "0 results found"] for label in zero_searches]
 
-    update_values(service, spreadsheet_id, jobs_sheet_name, job_rows)
-    update_values(service, spreadsheet_id, "Summary", summary_rows)
-    update_values(service, spreadsheet_id, "No Results", no_result_rows)
-    format_spreadsheet(service, spreadsheet_id, sheet_ids, len(job_rows))
+    update_values(service, spreadsheet_id, sheet_name, job_rows)
+    format_spreadsheet(service, spreadsheet_id, sheet_id, len(job_rows))
 
-    return spreadsheet["spreadsheetUrl"]
+    return f"{spreadsheet_url} (sheet: {sheet_name})"
+
+
+def parse_output_mode() -> set[str]:
+    aliases = {
+        "excel": {"excel"},
+        "local": {"excel"},
+        "xlsx": {"excel"},
+        "google": {"google_sheets"},
+        "drive": {"google_sheets"},
+        "google_sheets": {"google_sheets"},
+        "sheets": {"google_sheets"},
+        "both": {"excel", "google_sheets"},
+        "all": {"excel", "google_sheets"},
+    }
+    modes = aliases.get(OUTPUT_MODE)
+    if modes:
+        return modes
+
+    print(f"⚠ Unknown OUTPUT_MODE '{OUTPUT_MODE}', using local Excel output.")
+    return {"excel"}
 
 
 # ─────────────────────────────────────────────
@@ -609,17 +799,21 @@ def main():
         print("   Add keywords in the script.")
         return
 
-    print("Checking Google Sheets access ...")
-    try:
-        google_sheets_service = build_google_sheets_service()
-    except GoogleSheetsExportError as e:
-        print(f"\n❌ {e}")
-        return
+    output_modes = parse_output_mode()
+    google_sheets_service = None
+    if "google_sheets" in output_modes:
+        print("Checking Google Sheets access ...")
+        try:
+            google_sheets_service = build_google_sheets_service()
+        except GoogleSheetsExportError as e:
+            print(f"\n❌ {e}")
+            return
 
     print("=" * 60)
     print(f"  LinkedIn Job Scraper — {datetime.now().strftime('%Y-%m-%d %H:%M')}")
     print(f"  Actor: {ACTOR_ID}")
     print(f"  Search source: {search_source}")
+    print(f"  Output mode: {', '.join(sorted(output_modes))}")
     print(f"  Searches: {len(searches)}  |  Job types: {', '.join(CONTRACT_TYPES)}")
     print(f"  Experience levels: {', '.join(EXPERIENCE_LEVELS)}")
     print(f"  Max results per search: {MAX_RESULTS_PER_SEARCH}")
@@ -663,17 +857,22 @@ def main():
     unique_jobs.sort(key=sort_key, reverse=True)
 
     # ── Export ───────────────────────────────────
-    print("Creating Google Sheet ...")
-    try:
-        spreadsheet_url = export_to_google_sheets(
-            google_sheets_service,
-            unique_jobs,
-            zero_searches,
-            len(searches),
-        )
-    except GoogleSheetsExportError as e:
-        print(f"\n❌ {e}")
-        return
+    outputs = []
+    if "excel" in output_modes:
+        print(f"Saving local Excel file '{EXCEL_OUTPUT_FILE.name}' ...")
+        outputs.append(("Excel file", export_to_excel(unique_jobs, EXCEL_OUTPUT_FILE)))
+
+    if "google_sheets" in output_modes:
+        print("Creating Google Sheet ...")
+        try:
+            spreadsheet_url = export_to_google_sheets(
+                google_sheets_service,
+                unique_jobs,
+            )
+        except GoogleSheetsExportError as e:
+            print(f"\n❌ {e}")
+            return
+        outputs.append(("Google Sheet", spreadsheet_url))
 
     # ── Summary ──────────────────────────────────
     print("\n" + "=" * 60)
@@ -682,7 +881,8 @@ def main():
         print(f"  Searches with 0 results ({len(zero_searches)}):")
         for label in zero_searches:
             print(f"    • {label}")
-    print(f"  Google Sheet: {spreadsheet_url}")
+    for label, destination in outputs:
+        print(f"  {label}: {destination}")
     print("=" * 60)
 
 

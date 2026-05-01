@@ -1,7 +1,8 @@
 # LinkedIn Job Scraper
 
 Scrapes LinkedIn jobs daily across geo/GIS-related keywords,
-deduplicates results, and creates a Google Sheet in your Google Drive.
+deduplicates results, and saves them locally as Excel, in Google Sheets,
+or both.
 
 Uses Apify actor `curious_coder/linkedin-jobs-scraper`.
 
@@ -50,7 +51,23 @@ You can also override `.env` with an environment variable:
 export APIFY_API_TOKEN=apify_api_XXXXXXXXXXXX
 ```
 
-### 4. Set up Google Sheets access
+### 4. Set output mode
+
+At the top of `linkedin_job_scraper.py`, choose:
+
+```python
+OUTPUT_MODE = "excel"          # save runs as tabs in local jobs.xlsx
+OUTPUT_MODE = "google_sheets"  # save runs as tabs in one Drive spreadsheet named jobs
+OUTPUT_MODE = "both"           # do both
+```
+
+You can also override it from the terminal:
+
+```bash
+export JOBSCRAPER_OUTPUT_MODE=both
+```
+
+### 5. Set up Google Sheets access (only for `google_sheets` or `both`)
 
 In Google Cloud, enable the Google Sheets API, create an OAuth client for a
 desktop app, download the JSON file, and save it in this folder as:
@@ -61,7 +78,11 @@ google_client_secret.json
 
 On the first run, the script opens a Google login page. After you approve access,
 it saves a local `google_token.json` file so future runs can create Sheets
-without asking again. Both Google files are ignored by Git.
+without asking again. Local Google credential/token/id files are ignored by Git.
+
+The first Google Sheets run creates one spreadsheet named `jobs` and stores its
+ID in `google_spreadsheet_id.txt`. Future runs add new tabs to that same
+spreadsheet.
 
 If you use cron or another scheduler, run the script manually once first so
 `google_token.json` is created.
@@ -74,7 +95,8 @@ If you use cron or another scheduler, run the script manually once first so
 ```bash
 python linkedin_job_scraper.py
 ```
-Output: a Google Sheet URL printed in the terminal.
+Output: `jobs.xlsx`, a Google Sheet URL, or both, depending on `OUTPUT_MODE`.
+Each run is saved as a new tab named with the run date and time.
 
 ### Mac/Linux: use cron instead (cleaner)
 ```bash
@@ -87,7 +109,7 @@ Add this line (runs at 8am daily):
 
 ---
 
-## Output: Google Sheet columns
+## Output columns
 
 | Column | Description |
 |---|---|
@@ -131,6 +153,7 @@ All settings are at the top of `linkedin_job_scraper.py`:
 
 ```python
 MAX_RESULTS_PER_SEARCH = 500  # increase for more results (uses more credits)
+OUTPUT_MODE = "excel"  # choose: excel, google_sheets, both
 CONTRACT_TYPES = ["F", "P", "I"]  # full-time, part-time, internship
 EXPERIENCE_LEVELS = ["1", "2"]  # internship, entry level
 LOCATION = "Germany"
@@ -140,7 +163,8 @@ USE_INCOGNITO_MODE = True
 SPLIT_BY_LOCATION = False
 SPLIT_COUNTRY = "DE"
 DELAY_BETWEEN_REQUESTS = 3
-SPREADSHEET_TITLE = f"LinkedIn Jobs {datetime.now().strftime('%Y-%m-%d')}"
+EXCEL_OUTPUT_FILE = Path(__file__).with_name("jobs.xlsx")
+SPREADSHEET_TITLE = "jobs"
 ```
 
 To add/remove keywords, edit the `KEYWORDS` list.

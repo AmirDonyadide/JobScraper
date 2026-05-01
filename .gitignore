@@ -221,9 +221,11 @@ __marimo__/
 .DS_Store
 
 # Generated scraper output
+jobs.xlsx
 jobs_*.xlsx
 ~$*.xlsx
 
 # Local Google OAuth credentials and tokens
 google_client_secret.json
 google_token.json
+google_spreadsheet_id.txt
