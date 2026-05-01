@@ -112,6 +112,7 @@ SCRAPE_COMPANY_DETAILS = True
 USE_INCOGNITO_MODE = True
 SPLIT_BY_LOCATION = False
 SPLIT_COUNTRY = "DE"
+EXCLUDED_TITLE_TERMS = ["Werkstudent"]
 
 # ─────────────────────────────────────────────
 #  KEYWORDS
@@ -140,12 +141,12 @@ KEYWORDS = [
     "Geospatial",
     "Geovisualisierung",
     "GIS",
+    "GIS Fachkraft",
     "GIS Analyst",
     "GIS Entwickler",
     "GIS Spezialist",
     "Kartografie",
     "Laserscanning",
-    "Mapping",
     "Photogrammetrie",
     "Raumdaten",
     "Remote Sensing",
@@ -153,7 +154,6 @@ KEYWORDS = [
     "Land Surveying",
     "Topografie",
     "Trassierung",
-    "Umweltplanung",
     "Vermessung",
     "Vermessungsingenieur",
     "Vermessungstechniker",
@@ -336,6 +336,10 @@ def safe(job: dict, *keys) -> str:
     return "N/A"
 
 
+def get_title(job: dict) -> str:
+    return safe(job, "title", "jobTitle", "job_title", "name")
+
+
 def get_job_url(job: dict) -> str:
     url = (
         job.get("jobUrl")
@@ -366,12 +370,22 @@ def get_experience(job: dict) -> str:
     return safe(job, "experienceLevel", "experience_level", "seniorityLevel", "seniority_level", "seniority")
 
 
+def has_excluded_title(job: dict) -> bool:
+    title = get_title(job).casefold()
+    return any(term.casefold() in title for term in EXCLUDED_TITLE_TERMS)
+
+
+def filter_excluded_titles(jobs: list[dict]) -> tuple[list[dict], int]:
+    filtered_jobs = [job for job in jobs if not has_excluded_title(job)]
+    return filtered_jobs, len(jobs) - len(filtered_jobs)
+
+
 # ─────────────────────────────────────────────
 #  GOOGLE SHEETS EXPORT
 # ─────────────────────────────────────────────
 
 HEADER = [
-    "#", "Job Title", "Company", "Location", "Job Type", "Posted",
+    "Job Title", "Company", "Location", "Job Type", "Posted",
     "Experience Level", "Applicants", "Keywords Matched", "LinkedIn URL", 
     "Apply URL", "Company Website",
 ] 
@@ -427,7 +441,6 @@ def make_job_rows(jobs: list[dict]) -> list[list]:
         linkedin_url = get_job_url(job)
         apply_url = field(job, "applyUrl", "apply_url")
         rows.append([
-            i,
             field(job, "title", "jobTitle", "name"),
             field(job, "companyName", "company", "organization"),
             field(job, "location", "jobLocation", "place"),
@@ -793,6 +806,7 @@ def main():
         print("Checking Google Sheets access ...")
         try:
             google_sheets_service = build_google_sheets_service()
+            print("Google Sheets access OK.")
         except GoogleSheetsExportError as e:
             print(f"\n❌ {e}")
             return
@@ -811,7 +825,8 @@ def main():
     zero_searches: list[str]       = []
 
     for idx, (label, search_url) in enumerate(searches, start=1):
-        print(f"\n[{idx:02d}/{len(searches)}] Searching: '{label}' ...", end=" ", flush=True)
+        print(f"\n[{idx:02d}/{len(searches)}] Search: '{label}'")
+        print("  → Calling Apify actor ...", end=" ", flush=True)
 
         try:
             jobs = fetch_jobs_for_search(label, search_url)
@@ -835,9 +850,17 @@ def main():
     print("\n" + "─" * 60)
     print("Deduplicating results ...")
     unique_jobs = merge_and_deduplicate(all_results)
+    print(f"  → {len(unique_jobs)} unique job(s) after deduplication")
+
+    # ── Final title exclusions ───────────────────
+    print("Applying title filters ...")
+    unique_jobs, excluded_title_count = filter_excluded_titles(unique_jobs)
+    terms = ", ".join(EXCLUDED_TITLE_TERMS)
+    print(f"  → Removed {excluded_title_count} job(s) containing: {terms}")
 
     # ── Sort by posted date (most recent first) ──
     # Keep N/A entries at the bottom
+    print("Sorting results ...")
     def sort_key(job):
         posted = get_posted(job)
         return posted if posted != "N/A" else "0000"
@@ -865,6 +888,8 @@ def main():
     # ── Summary ──────────────────────────────────
     print("\n" + "=" * 60)
     print(f"  Searched {len(searches)} search URL(s) → Found {len(unique_jobs)} unique job postings.")
+    if excluded_title_count:
+        print(f"  Excluded by title rule: {excluded_title_count}")
     if zero_searches:
         print(f"  Searches with 0 results ({len(zero_searches)}):")
         for label in zero_searches:

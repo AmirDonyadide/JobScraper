@@ -144,6 +144,7 @@ Add this line (runs at 8am daily):
 - Experience level: Internship OR Entry level
 - Job type: Internship OR Part-time OR Full-time
 - Location: Germany
+- Excluded titles: any job title containing `Werkstudent` (case-insensitive)
 
 ---
 
@@ -162,6 +163,7 @@ SCRAPE_COMPANY_DETAILS = True
 USE_INCOGNITO_MODE = True
 SPLIT_BY_LOCATION = False
 SPLIT_COUNTRY = "DE"
+EXCLUDED_TITLE_TERMS = ["Werkstudent"]
 DELAY_BETWEEN_REQUESTS = 3
 EXCEL_OUTPUT_FILE = Path(__file__).with_name("jobs.xlsx")
 SPREADSHEET_TITLE = "jobs"
