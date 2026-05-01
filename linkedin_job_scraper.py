@@ -3,23 +3,22 @@ LinkedIn Job Scraper
 ====================
 Uses Apify's LinkedIn Jobs Scraper actor to search for jobs
 across multiple keywords with predefined filters, then deduplicates
-and exports results to a dated Excel file.
+and exports results to a Google Sheet in your Google Drive.
 
 Requirements:
-    pip install requests openpyxl
+    pip install -r requirements.txt
 
 Usage:
     1. Put APIFY_API_TOKEN in .env (or set it as an environment variable)
-    2. Run: python linkedin_job_scraper.py
-    3. Find your output in: jobs_YYYY-MM-DD.xlsx
+    2. Put Google OAuth credentials in google_client_secret.json
+    3. Run: python linkedin_job_scraper.py
+    4. Open the Google Sheet URL printed at the end
 """
 
+import json
 import os
 import time
 import requests
-import openpyxl
-from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
-from openpyxl.utils import get_column_letter
 from datetime import datetime
 from pathlib import Path
 from urllib.parse import urlencode
@@ -31,6 +30,11 @@ from urllib.parse import urlencode
 TOKEN_ENV_VAR = "APIFY_API_TOKEN"
 TOKEN_FILE = Path(__file__).with_name(".env")
 TOKEN_PLACEHOLDER = "apify_api_XXXXXXXXXXXX"
+GOOGLE_CLIENT_SECRET_FILE = Path(__file__).with_name("google_client_secret.json")
+GOOGLE_TOKEN_FILE = Path(__file__).with_name("google_token.json")
+GOOGLE_SCOPES = [
+    "https://www.googleapis.com/auth/spreadsheets",
+]
 
 
 def load_apify_token() -> str:
@@ -76,8 +80,8 @@ MAX_RESULTS_PER_SEARCH = 500
 # Seconds to wait between keyword requests (be polite to the API)
 DELAY_BETWEEN_REQUESTS = 3
 
-# Output file
-OUTPUT_FILE = f"jobs_{datetime.now().strftime('%Y-%m-%d')}.xlsx"
+# Output Google Sheet title
+SPREADSHEET_TITLE = f"LinkedIn Jobs {datetime.now().strftime('%Y-%m-%d')}"
 
 # ─────────────────────────────────────────────
 #  SEARCH FILTERS (LinkedIn URL parameters)
@@ -101,34 +105,45 @@ SPLIT_COUNTRY = "DE"
 # ─────────────────────────────────────────────
 
 KEYWORDS = [
-    "Geoinformationssysteme",
-    "Geoinformatik",
-    "Geodaten",
-    "Geodäsie",
-    "Vermessung",
-    "Geomatik",
-    "Kartografie",
-    "Fernerkundung",
-    "Stadtplanung",
-    "Erdbeobachtung",
-    "Raumdaten",
-    "GIS",
-    "Geovisualisierung",
-    "Topografie",
-    "Infrastrukturplanung",
-    "Trassierung",
-    "Standortanalyse",
-    "Umweltplanung",
-    "Surveying",
-    "Geomatics",
+    "3D Mapping",
+    "Bauvermessung",
     "Cartography",
-    "Remote Sensing",
     "Earth Observation",
-    "Spatial",
-    "Geoanalytics",
-    "Geospatial",
-    "Mapping",
+    "Erdbeobachtung",
+    "Fernerkundung",
     "GeoAI",
+    "Geoanalytics",
+    "Geodaten",
+    "Geodatenanalyse",
+    "Geodatenbank",
+    "Geodatenmanagement",
+    "Geodäsie",
+    "Geoinformatik",
+    "Geoinformatiker",
+    "Geoinformationssysteme",
+    "Geomatik",
+    "Geomatics",
+    "Geomatiker",
+    "Geospatial",
+    "Geovisualisierung",
+    "GIS",
+    "GIS Analyst",
+    "GIS Entwickler",
+    "GIS Spezialist",
+    "Kartografie",
+    "Laserscanning",
+    "Mapping",
+    "Photogrammetrie",
+    "Raumdaten",
+    "Remote Sensing",
+    "Spatial",
+    "Surveying",
+    "Topografie",
+    "Trassierung",
+    "Umweltplanung",
+    "Vermessung",
+    "Vermessungsingenieur",
+    "Vermessungstechniker",
 ]
 
 # ─────────────────────────────────────────────
@@ -339,112 +354,242 @@ def get_experience(job: dict) -> str:
 
 
 # ─────────────────────────────────────────────
-#  EXCEL EXPORT
+#  GOOGLE SHEETS EXPORT
 # ─────────────────────────────────────────────
 
 HEADER = [
-    "#", "Job Title", "Company", "Location",
-    "Job Type", "Posted", "Experience Level",
-    "Keywords Matched", "LinkedIn URL"
+    "#", "Job Title", "Company", "Location", "Job Type", "Posted",
+    "Experience Level", "Job Function", "Industries", "Salary",
+    "Applicants", "Benefits", "Workplace Types", "Remote Allowed",
+    "Keywords Matched", "LinkedIn URL", "Apply URL", "Company Website",
+    "Company Employees", "Job Poster", "Job Poster Title", "Description",
 ]
 
-# Colour palette matching your thesis :)
-COLOR_HEADER_BG  = "102C53"   # navy
-COLOR_HEADER_FG  = "FFFFFF"   # white
-COLOR_ROW_ODD    = "CADCFC"   # ice blue
-COLOR_ROW_EVEN   = "FFFFFF"   # white
-COLOR_ACCENT     = "C9A84C"   # gold (used for URL cells)
-
-THIN = Side(style="thin", color="AAAAAA")
-BORDER = Border(left=THIN, right=THIN, top=THIN, bottom=THIN)
+MAX_CELL_CHARS = 49000
 
 
-def style_header_cell(cell):
-    cell.font      = Font(bold=True, color=COLOR_HEADER_FG, name="Calibri", size=11)
-    cell.fill      = PatternFill("solid", fgColor=COLOR_HEADER_BG)
-    cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
-    cell.border    = BORDER
+class GoogleSheetsExportError(RuntimeError):
+    """Raised when Google Sheets export is not configured correctly."""
 
 
-def style_data_cell(cell, row_idx: int, is_url: bool = False):
-    bg = COLOR_ROW_ODD if row_idx % 2 == 1 else COLOR_ROW_EVEN
-    cell.fill      = PatternFill("solid", fgColor=bg)
-    cell.alignment = Alignment(vertical="top", wrap_text=True)
-    cell.border    = BORDER
-    if is_url:
-        cell.font  = Font(color=COLOR_ACCENT, name="Calibri", size=10, underline="single")
+def sheet_safe(value) -> str:
+    if value is None or value == "":
+        return "N/A"
+    if isinstance(value, list):
+        text = ", ".join(str(item) for item in value if item is not None and str(item).strip())
+    elif isinstance(value, dict):
+        text = json.dumps(value, ensure_ascii=False)
     else:
-        cell.font  = Font(name="Calibri", size=10)
+        text = str(value)
+
+    text = text.strip()
+    if not text:
+        return "N/A"
+    if len(text) > MAX_CELL_CHARS:
+        return text[:MAX_CELL_CHARS - 20] + " ... [truncated]"
+    if text[0] in "=+-@":
+        return "'" + text
+    return text
 
 
-def export_to_excel(jobs: list[dict], zero_searches: list[str], filename: str, search_count: int):
-    wb = openpyxl.Workbook()
-    ws = wb.active
-    ws.title = f"Jobs {datetime.now().strftime('%Y-%m-%d')}"
+def field(job: dict, *keys) -> str:
+    for key in keys:
+        value = job.get(key)
+        if value is not None and sheet_safe(value) != "N/A":
+            return sheet_safe(value)
+    return "N/A"
 
-    # ── Header row ──────────────────────────────
-    ws.append(HEADER)
-    for col_idx, _ in enumerate(HEADER, start=1):
-        style_header_cell(ws.cell(row=1, column=col_idx))
-    ws.row_dimensions[1].height = 30
 
-    # ── Data rows ───────────────────────────────
+def sheets_string(value: str) -> str:
+    return str(value).replace('"', '""')
+
+
+def hyperlink_formula(url: str, label: str) -> str:
+    if not url or url == "N/A":
+        return "N/A"
+    return f'=HYPERLINK("{sheets_string(url)}", "{sheets_string(label)}")'
+
+
+def make_job_rows(jobs: list[dict]) -> list[list]:
+    rows = [HEADER]
     for i, job in enumerate(jobs, start=1):
-        keywords_str = ", ".join(job.get("keywords_matched", []))
-        url          = get_job_url(job)
-
-        row_data = [
+        linkedin_url = get_job_url(job)
+        apply_url = field(job, "applyUrl", "apply_url")
+        rows.append([
             i,
-            safe(job, "title", "jobTitle", "name"),
-            safe(job, "company", "companyName", "organization"),
-            safe(job, "location", "jobLocation", "place"),
+            field(job, "title", "jobTitle", "name"),
+            field(job, "companyName", "company", "organization"),
+            field(job, "location", "jobLocation", "place"),
             get_job_type(job),
             get_posted(job),
             get_experience(job),
-            keywords_str,
-            url,
-        ]
-        ws.append(row_data)
+            field(job, "jobFunction", "job_function"),
+            field(job, "industries", "industry"),
+            field(job, "salaryInfo", "salary_info", "salaryInsights", "salary_insights"),
+            field(job, "applicantsCount", "applicants_count"),
+            field(job, "benefits"),
+            field(job, "workplaceTypes", "workplace_types"),
+            field(job, "workRemoteAllowed", "work_remote_allowed"),
+            ", ".join(job.get("keywords_matched", [])),
+            hyperlink_formula(linkedin_url, "Open LinkedIn"),
+            hyperlink_formula(apply_url, "Open Apply"),
+            hyperlink_formula(field(job, "companyWebsite", "company_website"), "Open Company"),
+            field(job, "companyEmployeesCount", "company_employees_count"),
+            field(job, "jobPosterName", "job_poster_name"),
+            field(job, "jobPosterTitle", "job_poster_title"),
+            field(job, "descriptionText", "description_text"),
+        ])
+    return rows
 
-        excel_row = i + 1  # +1 because row 1 is header
-        for col_idx, value in enumerate(row_data, start=1):
-            cell    = ws.cell(row=excel_row, column=col_idx)
-            is_url  = (col_idx == len(HEADER))  # last column
-            style_data_cell(cell, i, is_url=is_url)
 
-            # Make URL a clickable hyperlink
-            if is_url and value != "N/A":
-                cell.hyperlink = value
-                cell.value     = "Open →"
+def build_google_sheets_service():
+    try:
+        from google.auth.transport.requests import Request
+        from google.oauth2.credentials import Credentials
+        from google_auth_oauthlib.flow import InstalledAppFlow
+        from googleapiclient.discovery import build
+    except ImportError as e:
+        raise GoogleSheetsExportError(
+            "Missing Google API packages. Install them with:\n"
+            "   pip install -r requirements.txt"
+        ) from e
 
-        ws.row_dimensions[excel_row].height = 45
+    creds = None
+    if GOOGLE_TOKEN_FILE.exists():
+        creds = Credentials.from_authorized_user_file(str(GOOGLE_TOKEN_FILE), GOOGLE_SCOPES)
+        if not creds.has_scopes(GOOGLE_SCOPES):
+            creds = None
 
-    # ── Column widths ────────────────────────────
-    col_widths = [5, 40, 28, 22, 16, 18, 18, 40, 12]
-    for col_idx, width in enumerate(col_widths, start=1):
-        ws.column_dimensions[get_column_letter(col_idx)].width = width
+    if not creds or not creds.valid:
+        if creds and creds.expired and creds.refresh_token:
+            creds.refresh(Request())
+        else:
+            if not GOOGLE_CLIENT_SECRET_FILE.exists():
+                raise GoogleSheetsExportError(
+                    f"Missing {GOOGLE_CLIENT_SECRET_FILE.name}. Create a Google OAuth "
+                    "Desktop client, download its JSON credentials, and save it in this folder."
+                )
+            flow = InstalledAppFlow.from_client_secrets_file(str(GOOGLE_CLIENT_SECRET_FILE), GOOGLE_SCOPES)
+            creds = flow.run_local_server(port=0)
 
-    # ── Freeze header row ────────────────────────
-    ws.freeze_panes = "A2"
+        GOOGLE_TOKEN_FILE.write_text(creds.to_json(), encoding="utf-8")
 
-    # ── Auto-filter ──────────────────────────────
-    ws.auto_filter.ref = ws.dimensions
+    return build("sheets", "v4", credentials=creds)
 
-    # ── Zero-results sheet ───────────────────────
-    if zero_searches:
-        ws2 = wb.create_sheet("No Results")
-        ws2.append(["Search", "Status"])
-        for label in zero_searches:
-            ws2.append([label, "0 results found"])
 
-    # ── Summary sheet ────────────────────────────
-    ws3 = wb.create_sheet("Summary")
-    ws3.append(["Run date",        datetime.now().strftime("%Y-%m-%d %H:%M")])
-    ws3.append(["Searches run", search_count])
-    ws3.append(["Unique jobs found",  len(jobs)])
-    ws3.append(["Searches with 0 results", len(zero_searches)])
+def quote_sheet_name(name: str) -> str:
+    return "'" + name.replace("'", "''") + "'"
 
-    wb.save(filename)
+
+def update_values(service, spreadsheet_id: str, sheet_name: str, rows: list[list]):
+    service.spreadsheets().values().update(
+        spreadsheetId=spreadsheet_id,
+        range=f"{quote_sheet_name(sheet_name)}!A1",
+        valueInputOption="USER_ENTERED",
+        body={"values": rows},
+    ).execute()
+
+
+def format_spreadsheet(service, spreadsheet_id: str, sheet_ids: dict[str, int], job_row_count: int):
+    jobs_sheet_id = sheet_ids["Jobs"]
+    requests_body = [
+        {
+            "updateSheetProperties": {
+                "properties": {
+                    "sheetId": jobs_sheet_id,
+                    "gridProperties": {"frozenRowCount": 1},
+                },
+                "fields": "gridProperties.frozenRowCount",
+            }
+        },
+        {
+            "repeatCell": {
+                "range": {
+                    "sheetId": jobs_sheet_id,
+                    "startRowIndex": 0,
+                    "endRowIndex": 1,
+                },
+                "cell": {
+                    "userEnteredFormat": {
+                        "backgroundColor": {"red": 0.063, "green": 0.173, "blue": 0.325},
+                        "horizontalAlignment": "CENTER",
+                        "textFormat": {
+                            "bold": True,
+                            "foregroundColor": {"red": 1, "green": 1, "blue": 1},
+                        },
+                    }
+                },
+                "fields": "userEnteredFormat(backgroundColor,horizontalAlignment,textFormat)",
+            }
+        },
+        {
+            "setBasicFilter": {
+                "filter": {
+                    "range": {
+                        "sheetId": jobs_sheet_id,
+                        "startRowIndex": 0,
+                        "endRowIndex": max(job_row_count, 1),
+                        "startColumnIndex": 0,
+                        "endColumnIndex": len(HEADER),
+                    }
+                }
+            }
+        },
+        {
+            "autoResizeDimensions": {
+                "dimensions": {
+                    "sheetId": jobs_sheet_id,
+                    "dimension": "COLUMNS",
+                    "startIndex": 0,
+                    "endIndex": len(HEADER),
+                }
+            }
+        },
+    ]
+
+    service.spreadsheets().batchUpdate(
+        spreadsheetId=spreadsheet_id,
+        body={"requests": requests_body},
+    ).execute()
+
+
+def export_to_google_sheets(service, jobs: list[dict], zero_searches: list[str], search_count: int) -> str:
+    jobs_sheet_name = f"Jobs {datetime.now().strftime('%Y-%m-%d')}"
+    spreadsheet = service.spreadsheets().create(
+        body={
+            "properties": {"title": SPREADSHEET_TITLE},
+            "sheets": [
+                {"properties": {"title": jobs_sheet_name}},
+                {"properties": {"title": "Summary"}},
+                {"properties": {"title": "No Results"}},
+            ],
+        },
+        fields="spreadsheetId,spreadsheetUrl,sheets(properties(sheetId,title))",
+    ).execute()
+
+    spreadsheet_id = spreadsheet["spreadsheetId"]
+    sheet_ids = {
+        sheet["properties"]["title"]: sheet["properties"]["sheetId"]
+        for sheet in spreadsheet["sheets"]
+    }
+    sheet_ids["Jobs"] = sheet_ids[jobs_sheet_name]
+
+    job_rows = make_job_rows(jobs)
+    summary_rows = [
+        ["Run date", datetime.now().strftime("%Y-%m-%d %H:%M")],
+        ["Searches run", search_count],
+        ["Unique jobs found", len(jobs)],
+        ["Searches with 0 results", len(zero_searches)],
+        ["Actor", ACTOR_ID],
+    ]
+    no_result_rows = [["Search", "Status"]] + [[label, "0 results found"] for label in zero_searches]
+
+    update_values(service, spreadsheet_id, jobs_sheet_name, job_rows)
+    update_values(service, spreadsheet_id, "Summary", summary_rows)
+    update_values(service, spreadsheet_id, "No Results", no_result_rows)
+    format_spreadsheet(service, spreadsheet_id, sheet_ids, len(job_rows))
+
+    return spreadsheet["spreadsheetUrl"]
 
 
 # ─────────────────────────────────────────────
@@ -462,6 +607,13 @@ def main():
     if not searches:
         print("❌ No LinkedIn searches configured.")
         print("   Add keywords in the script.")
+        return
+
+    print("Checking Google Sheets access ...")
+    try:
+        google_sheets_service = build_google_sheets_service()
+    except GoogleSheetsExportError as e:
+        print(f"\n❌ {e}")
         return
 
     print("=" * 60)
@@ -511,8 +663,17 @@ def main():
     unique_jobs.sort(key=sort_key, reverse=True)
 
     # ── Export ───────────────────────────────────
-    print(f"Exporting to '{OUTPUT_FILE}' ...")
-    export_to_excel(unique_jobs, zero_searches, OUTPUT_FILE, len(searches))
+    print("Creating Google Sheet ...")
+    try:
+        spreadsheet_url = export_to_google_sheets(
+            google_sheets_service,
+            unique_jobs,
+            zero_searches,
+            len(searches),
+        )
+    except GoogleSheetsExportError as e:
+        print(f"\n❌ {e}")
+        return
 
     # ── Summary ──────────────────────────────────
     print("\n" + "=" * 60)
@@ -521,7 +682,7 @@ def main():
         print(f"  Searches with 0 results ({len(zero_searches)}):")
         for label in zero_searches:
             print(f"    • {label}")
-    print(f"  Output saved to: {OUTPUT_FILE}")
+    print(f"  Google Sheet: {spreadsheet_url}")
     print("=" * 60)
 
 

@@ -223,3 +223,7 @@ __marimo__/
 # Generated scraper output
 jobs_*.xlsx
 ~$*.xlsx
+
+# Local Google OAuth credentials and tokens
+google_client_secret.json
+google_token.json

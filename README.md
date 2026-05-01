@@ -1,7 +1,7 @@
 # LinkedIn Job Scraper
 
 Scrapes LinkedIn jobs daily across geo/GIS-related keywords,
-deduplicates results, and exports a clean Excel file per day.
+deduplicates results, and creates a Google Sheet in your Google Drive.
 
 Uses Apify actor `curious_coder/linkedin-jobs-scraper`.
 
@@ -19,7 +19,7 @@ Uses Apify actor `curious_coder/linkedin-jobs-scraper`.
 
 ### 1. Install dependencies
 ```bash
-pip install requests openpyxl
+pip install -r requirements.txt
 ```
 
 ### 2. Get your Apify token
@@ -50,6 +50,22 @@ You can also override `.env` with an environment variable:
 export APIFY_API_TOKEN=apify_api_XXXXXXXXXXXX
 ```
 
+### 4. Set up Google Sheets access
+
+In Google Cloud, enable the Google Sheets API, create an OAuth client for a
+desktop app, download the JSON file, and save it in this folder as:
+
+```text
+google_client_secret.json
+```
+
+On the first run, the script opens a Google login page. After you approve access,
+it saves a local `google_token.json` file so future runs can create Sheets
+without asking again. Both Google files are ignored by Git.
+
+If you use cron or another scheduler, run the script manually once first so
+`google_token.json` is created.
+
 ---
 
 ## Running
@@ -58,7 +74,7 @@ export APIFY_API_TOKEN=apify_api_XXXXXXXXXXXX
 ```bash
 python linkedin_job_scraper.py
 ```
-Output: `jobs_2026-05-01.xlsx` (today's date)
+Output: a Google Sheet URL printed in the terminal.
 
 ### Mac/Linux: use cron instead (cleaner)
 ```bash
@@ -71,7 +87,7 @@ Add this line (runs at 8am daily):
 
 ---
 
-## Output: Excel file columns
+## Output: Google Sheet columns
 
 | Column | Description |
 |---|---|
@@ -82,8 +98,21 @@ Add this line (runs at 8am daily):
 | Job Type | Full-time / Part-time / Internship |
 | Posted | When posted |
 | Experience Level | Entry level etc. |
+| Job Function | Department or discipline |
+| Industries | Job industries |
+| Salary | Salary or salary insights if available |
+| Applicants | Applicant count if visible |
+| Benefits | LinkedIn insight tags |
+| Workplace Types | On-site / remote / hybrid info if available |
+| Remote Allowed | Whether remote work is allowed |
 | Keywords Matched | All keywords that returned this job |
 | LinkedIn URL | Clickable link → opens job posting |
+| Apply URL | Clickable external application link if available |
+| Company Website | Clickable company website if available |
+| Company Employees | Company employee count if available |
+| Job Poster | Recruiter/poster name if available |
+| Job Poster Title | Recruiter/poster title if available |
+| Description | Plain-text job description |
 
 ---
 
@@ -111,7 +140,7 @@ USE_INCOGNITO_MODE = True
 SPLIT_BY_LOCATION = False
 SPLIT_COUNTRY = "DE"
 DELAY_BETWEEN_REQUESTS = 3
-OUTPUT_FILE = f"jobs_{datetime.now().strftime('%Y-%m-%d')}.xlsx"
+SPREADSHEET_TITLE = f"LinkedIn Jobs {datetime.now().strftime('%Y-%m-%d')}"
 ```
 
 To add/remove keywords, edit the `KEYWORDS` list.
