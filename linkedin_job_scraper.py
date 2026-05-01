@@ -65,8 +65,8 @@ def load_apify_token() -> str:
 
 APIFY_API_TOKEN = load_apify_token()
 
-# Apify actor for LinkedIn Jobs (bebity's scraper)
-ACTOR_ID = "bebity~linkedin-jobs-scraper"
+# Apify actor for LinkedIn Jobs (scraper)
+ACTOR_ID = "curious_coder/linkedin-jobs-scraper"
 
 # Max jobs to fetch per keyword/job type pair (increase if you want more, costs more credits)
 MAX_RESULTS_PER_JOB_TYPE = 100
