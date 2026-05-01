@@ -26,7 +26,9 @@ jobs:
       GOOGLE_SPREADSHEET_ID: ${{ secrets.GOOGLE_SPREADSHEET_ID }}
       GOOGLE_TOKEN_JSON: ${{ secrets.GOOGLE_TOKEN_JSON }}
       JOBSCRAPER_OUTPUT_MODE: google_sheets
+      JOBSCRAPER_TIMEZONE: Europe/Rome
       PYTHONUNBUFFERED: "1"
+      TZ: Europe/Rome
 
     steps:
       - name: Check Europe/Rome run window
@@ -131,8 +133,9 @@ jobs:
         run: |
           set -o pipefail
 
-          echo "Starting LinkedIn Job Scraper at $(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+          echo "Starting LinkedIn Job Scraper at $(date +'%Y-%m-%dT%H:%M:%S%z') (${TZ})"
           echo "Output mode: ${JOBSCRAPER_OUTPUT_MODE}"
+          echo "Scraper timezone: ${JOBSCRAPER_TIMEZONE}"
 
           python -u linkedin_job_scraper.py 2>&1 | tee scraper.log
           status=${PIPESTATUS[0]}

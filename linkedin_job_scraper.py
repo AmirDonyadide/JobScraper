@@ -23,6 +23,7 @@ import openpyxl
 from datetime import datetime
 from pathlib import Path
 from urllib.parse import urlencode
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
@@ -39,8 +40,6 @@ GOOGLE_SPREADSHEET_ID_FILE = Path(__file__).with_name("google_spreadsheet_id.txt
 GOOGLE_SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets",
 ]
-RUN_STARTED_AT = datetime.now()
-RUN_SHEET_NAME = RUN_STARTED_AT.strftime("%Y-%m-%d %H-%M-%S")
 
 
 def load_local_env() -> dict[str, str]:
@@ -84,6 +83,16 @@ def load_apify_token() -> str:
 
 APIFY_API_TOKEN = load_apify_token()
 GOOGLE_SPREADSHEET_ID = load_setting("GOOGLE_SPREADSHEET_ID")
+SCRAPER_TIMEZONE = load_setting("JOBSCRAPER_TIMEZONE", "Europe/Rome")
+
+try:
+    SCRAPER_TZ = ZoneInfo(SCRAPER_TIMEZONE)
+except ZoneInfoNotFoundError:
+    SCRAPER_TIMEZONE = "UTC"
+    SCRAPER_TZ = ZoneInfo("UTC")
+
+RUN_STARTED_AT = datetime.now(SCRAPER_TZ)
+RUN_SHEET_NAME = RUN_STARTED_AT.strftime("%Y-%m-%d %H-%M-%S")
 
 # Apify actor for LinkedIn Jobs (Curious Coder scraper)
 # Apify's raw REST API uses "~" between username and actor name.
@@ -819,10 +828,11 @@ def main():
             return
 
     print("=" * 60)
-    print(f"  LinkedIn Job Scraper — {datetime.now().strftime('%Y-%m-%d %H:%M')}")
+    print(f"  LinkedIn Job Scraper — {RUN_STARTED_AT.strftime('%Y-%m-%d %H:%M %Z')}")
     print(f"  Actor: {ACTOR_ID}")
     print(f"  Search source: {search_source}")
     print(f"  Output mode: {', '.join(sorted(output_modes))}")
+    print(f"  Timezone: {SCRAPER_TIMEZONE}")
     print(f"  Searches: {len(searches)}  |  Job types: {', '.join(CONTRACT_TYPES)}")
     print(f"  Experience levels: {', '.join(EXPERIENCE_LEVELS)}")
     print(f"  Max results per search: {MAX_RESULTS_PER_SEARCH}")
