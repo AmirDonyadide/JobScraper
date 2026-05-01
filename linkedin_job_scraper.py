@@ -10,7 +10,7 @@ Requirements:
 
 Usage:
     1. Put APIFY_API_TOKEN in .env (or set it as an environment variable)
-    2. Set OUTPUT_MODE below: excel, google_sheets, or both
+    2. Optional: set JOBSCRAPER_OUTPUT_MODE to excel, google_sheets, or both
     3. Run: python linkedin_job_scraper.py
     4. Open the printed output path or Google Sheet URL
 """
@@ -36,7 +36,6 @@ TOKEN_PLACEHOLDER = "apify_api_XXXXXXXXXXXX"
 GOOGLE_CLIENT_SECRET_FILE = Path(__file__).with_name("google_client_secret.json")
 GOOGLE_TOKEN_FILE = Path(__file__).with_name("google_token.json")
 GOOGLE_SPREADSHEET_ID_FILE = Path(__file__).with_name("google_spreadsheet_id.txt")
-GOOGLE_SPREADSHEET_ID = os.environ.get("GOOGLE_SPREADSHEET_ID", "").strip()
 GOOGLE_SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets",
 ]
@@ -44,20 +43,17 @@ RUN_STARTED_AT = datetime.now()
 RUN_SHEET_NAME = RUN_STARTED_AT.strftime("%Y-%m-%d %H-%M-%S")
 
 
-def load_apify_token() -> str:
+def load_local_env() -> dict[str, str]:
     """
-    Load the Apify token from the environment first, then from local .env.
+    Load simple KEY=value settings from local .env.
 
     Supported .env formats:
         APIFY_API_TOKEN=apify_api_XXXXXXXXXXXX
         export APIFY_API_TOKEN=apify_api_XXXXXXXXXXXX
     """
-    token = os.environ.get(TOKEN_ENV_VAR, "").strip()
-    if token:
-        return token
-
+    values = {}
     if not TOKEN_FILE.exists():
-        return ""
+        return values
 
     for line in TOKEN_FILE.read_text(encoding="utf-8").splitlines():
         line = line.strip()
@@ -69,13 +65,25 @@ def load_apify_token() -> str:
             continue
 
         key, value = line.split("=", 1)
-        if key.strip() == TOKEN_ENV_VAR:
-            return value.strip().strip("\"'")
+        values[key.strip()] = value.strip().strip("\"'")
 
-    return ""
+    return values
+
+
+LOCAL_ENV = load_local_env()
+
+
+def load_setting(name: str, default: str = "") -> str:
+    return os.environ.get(name, LOCAL_ENV.get(name, default)).strip()
+
+
+def load_apify_token() -> str:
+    """Load the Apify token from the environment first, then from local .env."""
+    return load_setting(TOKEN_ENV_VAR)
 
 
 APIFY_API_TOKEN = load_apify_token()
+GOOGLE_SPREADSHEET_ID = load_setting("GOOGLE_SPREADSHEET_ID")
 
 # Apify actor for LinkedIn Jobs (Curious Coder scraper)
 # Apify's raw REST API uses "~" between username and actor name.
@@ -88,7 +96,7 @@ MAX_RESULTS_PER_SEARCH = 500
 DELAY_BETWEEN_REQUESTS = 3
 
 # Choose: "excel", "google_sheets", or "both"
-OUTPUT_MODE = os.environ.get("JOBSCRAPER_OUTPUT_MODE", "excel").strip().lower()
+OUTPUT_MODE = load_setting("JOBSCRAPER_OUTPUT_MODE", "excel").lower()
 
 # Local Excel output path
 EXCEL_OUTPUT_FILE = Path(__file__).with_name("jobs.xlsx")
@@ -150,7 +158,6 @@ KEYWORDS = [
     "Photogrammetrie",
     "Raumdaten",
     "Remote Sensing",
-    "Spatial",
     "Land Surveying",
     "Topografie",
     "Trassierung",
