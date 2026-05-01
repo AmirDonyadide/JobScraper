@@ -70,8 +70,8 @@ APIFY_API_TOKEN = load_apify_token()
 # Apify's raw REST API uses "~" between username and actor name.
 ACTOR_ID = "curious_coder~linkedin-jobs-scraper"
 
-# Max jobs to fetch per keyword (increase if you want more, costs more credits)
-MAX_RESULTS_PER_KEYWORD = 100
+# Max jobs to fetch per search URL (increase if you want more, costs more credits)
+MAX_RESULTS_PER_SEARCH = 500
 
 # Seconds to wait between keyword requests (be polite to the API)
 DELAY_BETWEEN_REQUESTS = 3
@@ -83,17 +83,18 @@ OUTPUT_FILE = f"jobs_{datetime.now().strftime('%Y-%m-%d')}.xlsx"
 #  SEARCH FILTERS (LinkedIn URL parameters)
 # ─────────────────────────────────────────────
 # f_TPR=r86400 -> Posted in last 24 hours
-# f_E=1        -> Entry level
+# f_E values   -> 1=Internship, 2=Entry level
 # f_JT values  -> F=Full-time, P=Part-time, I=Internship
 
 LOCATION = "Germany"
 GEO_ID = "101282230"
 PUBLISHED_AT = "r86400"
-EXPERIENCE_LEVEL = "1"
+EXPERIENCE_LEVELS = ["1", "2"]
 CONTRACT_TYPES = ["F", "P", "I"]
 SCRAPE_COMPANY_DETAILS = True
 USE_INCOGNITO_MODE = True
 SPLIT_BY_LOCATION = False
+SPLIT_COUNTRY = "DE"
 
 # ─────────────────────────────────────────────
 #  KEYWORDS
@@ -164,7 +165,7 @@ def build_search_url(keyword: str) -> str:
         "location": LOCATION,
         "geoId": GEO_ID,
         "f_TPR": PUBLISHED_AT,
-        "f_E": EXPERIENCE_LEVEL,
+        "f_E": ",".join(EXPERIENCE_LEVELS),
         "f_JT": ",".join(CONTRACT_TYPES),
         "position": "1",
         "pageNum": "0",
@@ -172,14 +173,22 @@ def build_search_url(keyword: str) -> str:
     return f"https://www.linkedin.com/jobs/search/?{urlencode(params)}"
 
 
-def build_actor_input(keyword: str) -> dict:
-    return {
-        "urls": [build_search_url(keyword)],
-        "count": MAX_RESULTS_PER_KEYWORD,
+def get_searches() -> tuple[str, list[tuple[str, str]]]:
+    generated_searches = [(keyword, build_search_url(keyword)) for keyword in KEYWORDS]
+    return "generated keyword URLs", generated_searches
+
+
+def build_actor_input(search_url: str) -> dict:
+    payload = {
+        "urls": [search_url],
+        "count": MAX_RESULTS_PER_SEARCH,
         "scrapeCompany": SCRAPE_COMPANY_DETAILS,
         "useIncognitoMode": USE_INCOGNITO_MODE,
         "splitByLocation": SPLIT_BY_LOCATION,
     }
+    if SPLIT_BY_LOCATION:
+        payload["splitCountry"] = SPLIT_COUNTRY
+    return payload
 
 
 def run_actor(payload: dict) -> list[dict]:
@@ -187,7 +196,7 @@ def run_actor(payload: dict) -> list[dict]:
     params = {
         "timeout": 300,
         "memory": 512,
-        "maxItems": MAX_RESULTS_PER_KEYWORD,
+        "maxItems": MAX_RESULTS_PER_SEARCH,
     }
 
     response = requests.post(
@@ -218,19 +227,19 @@ def run_actor(payload: dict) -> list[dict]:
     return []
 
 
-def fetch_jobs_for_keyword(keyword: str) -> list[dict]:
+def fetch_jobs_for_search(label: str, search_url: str) -> list[dict]:
     """
     Calls the Apify LinkedIn Jobs Scraper actor synchronously
-    and returns a list of job dicts for the given keyword.
+    and returns a list of job dicts for the given LinkedIn search URL.
     """
     try:
-        return run_actor(build_actor_input(keyword))
+        return run_actor(build_actor_input(search_url))
     except requests.exceptions.Timeout:
-        print(f"  ⚠ Timeout for keyword '{keyword}' — skipping.")
+        print(f"  ⚠ Timeout for search '{label}' — skipping.")
         return []
     except requests.exceptions.ConnectionError as e:
         raise ApifyConfigurationError(
-            f"Could not connect to Apify API while searching '{keyword}'. "
+            f"Could not connect to Apify API while searching '{label}'. "
             f"Check your internet connection/DNS and try again. Details: {e}"
         ) from e
     except ApifyConfigurationError:
@@ -238,10 +247,10 @@ def fetch_jobs_for_keyword(keyword: str) -> list[dict]:
     except requests.exceptions.HTTPError as e:
         response = e.response
         details = f" {apify_error_message(response)}" if response is not None else ""
-        print(f"  ⚠ HTTP error for keyword '{keyword}': {e}.{details} — skipping.")
+        print(f"  ⚠ HTTP error for search '{label}': {e}.{details} — skipping.")
         return []
     except Exception as e:
-        print(f"  ⚠ Unexpected error for keyword '{keyword}': {e} — skipping.")
+        print(f"  ⚠ Unexpected error for search '{label}': {e} — skipping.")
         return []
 
 
@@ -368,7 +377,7 @@ def style_data_cell(cell, row_idx: int, is_url: bool = False):
         cell.font  = Font(name="Calibri", size=10)
 
 
-def export_to_excel(jobs: list[dict], zero_keywords: list[str], filename: str):
+def export_to_excel(jobs: list[dict], zero_searches: list[str], filename: str, search_count: int):
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = f"Jobs {datetime.now().strftime('%Y-%m-%d')}"
@@ -422,18 +431,18 @@ def export_to_excel(jobs: list[dict], zero_keywords: list[str], filename: str):
     ws.auto_filter.ref = ws.dimensions
 
     # ── Zero-results sheet ───────────────────────
-    if zero_keywords:
+    if zero_searches:
         ws2 = wb.create_sheet("No Results")
-        ws2.append(["Keyword", "Status"])
-        for kw in zero_keywords:
-            ws2.append([kw, "0 results found"])
+        ws2.append(["Search", "Status"])
+        for label in zero_searches:
+            ws2.append([label, "0 results found"])
 
     # ── Summary sheet ────────────────────────────
     ws3 = wb.create_sheet("Summary")
     ws3.append(["Run date",        datetime.now().strftime("%Y-%m-%d %H:%M")])
-    ws3.append(["Keywords searched", len(KEYWORDS)])
+    ws3.append(["Searches run", search_count])
     ws3.append(["Unique jobs found",  len(jobs)])
-    ws3.append(["Keywords with 0 results", len(zero_keywords)])
+    ws3.append(["Searches with 0 results", len(zero_searches)])
 
     wb.save(filename)
 
@@ -449,35 +458,43 @@ def main():
         print(f"   {TOKEN_ENV_VAR}={TOKEN_PLACEHOLDER}")
         return
 
+    search_source, searches = get_searches()
+    if not searches:
+        print("❌ No LinkedIn searches configured.")
+        print("   Add keywords in the script.")
+        return
+
     print("=" * 60)
     print(f"  LinkedIn Job Scraper — {datetime.now().strftime('%Y-%m-%d %H:%M')}")
     print(f"  Actor: {ACTOR_ID}")
-    print(f"  Keywords: {len(KEYWORDS)}  |  Job types: {', '.join(CONTRACT_TYPES)}")
-    print(f"  Max results per keyword: {MAX_RESULTS_PER_KEYWORD}")
+    print(f"  Search source: {search_source}")
+    print(f"  Searches: {len(searches)}  |  Job types: {', '.join(CONTRACT_TYPES)}")
+    print(f"  Experience levels: {', '.join(EXPERIENCE_LEVELS)}")
+    print(f"  Max results per search: {MAX_RESULTS_PER_SEARCH}")
     print("=" * 60)
 
     all_results:   dict[str, list] = {}
-    zero_keywords: list[str]       = []
+    zero_searches: list[str]       = []
 
-    for idx, keyword in enumerate(KEYWORDS, start=1):
-        print(f"\n[{idx:02d}/{len(KEYWORDS)}] Searching: '{keyword}' ...", end=" ", flush=True)
+    for idx, (label, search_url) in enumerate(searches, start=1):
+        print(f"\n[{idx:02d}/{len(searches)}] Searching: '{label}' ...", end=" ", flush=True)
 
         try:
-            jobs = fetch_jobs_for_keyword(keyword)
+            jobs = fetch_jobs_for_search(label, search_url)
         except ApifyConfigurationError as e:
             print(f"\n❌ {e}")
             print("   Fix the issue above, then run the script again.")
             return
 
-        all_results[keyword] = jobs
+        all_results[label] = jobs
 
         if jobs:
             print(f"✓ {len(jobs)} job(s) found")
         else:
             print(f"— 0 results")
-            zero_keywords.append(keyword)
+            zero_searches.append(label)
 
-        if idx < len(KEYWORDS):
+        if idx < len(searches):
             time.sleep(DELAY_BETWEEN_REQUESTS)
 
     # ── Deduplicate ──────────────────────────────
@@ -495,15 +512,15 @@ def main():
 
     # ── Export ───────────────────────────────────
     print(f"Exporting to '{OUTPUT_FILE}' ...")
-    export_to_excel(unique_jobs, zero_keywords, OUTPUT_FILE)
+    export_to_excel(unique_jobs, zero_searches, OUTPUT_FILE, len(searches))
 
     # ── Summary ──────────────────────────────────
     print("\n" + "=" * 60)
-    print(f"  Searched {len(KEYWORDS)} keywords → Found {len(unique_jobs)} unique job postings.")
-    if zero_keywords:
-        print(f"  Keywords with 0 results ({len(zero_keywords)}):")
-        for kw in zero_keywords:
-            print(f"    • {kw}")
+    print(f"  Searched {len(searches)} search URL(s) → Found {len(unique_jobs)} unique job postings.")
+    if zero_searches:
+        print(f"  Searches with 0 results ({len(zero_searches)}):")
+        for label in zero_searches:
+            print(f"    • {label}")
     print(f"  Output saved to: {OUTPUT_FILE}")
     print("=" * 60)
 

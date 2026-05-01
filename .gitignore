@@ -222,3 +222,4 @@ __marimo__/
 
 # Generated scraper output
 jobs_*.xlsx
+~$*.xlsx
