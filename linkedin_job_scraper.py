@@ -150,7 +150,7 @@ KEYWORDS = [
     "Raumdaten",
     "Remote Sensing",
     "Spatial",
-    "Surveying",
+    "Land Surveying",
     "Topografie",
     "Trassierung",
     "Umweltplanung",
@@ -372,11 +372,9 @@ def get_experience(job: dict) -> str:
 
 HEADER = [
     "#", "Job Title", "Company", "Location", "Job Type", "Posted",
-    "Experience Level", "Job Function", "Industries", "Salary",
-    "Applicants", "Benefits", "Workplace Types", "Remote Allowed",
-    "Keywords Matched", "LinkedIn URL", "Apply URL", "Company Website",
-    "Company Employees", "Job Poster", "Job Poster Title", "Description",
-]
+    "Experience Level", "Applicants", "Keywords Matched", "LinkedIn URL", 
+    "Apply URL", "Company Website",
+] 
 
 MAX_CELL_CHARS = 49000
 
@@ -436,21 +434,11 @@ def make_job_rows(jobs: list[dict]) -> list[list]:
             get_job_type(job),
             get_posted(job),
             get_experience(job),
-            field(job, "jobFunction", "job_function"),
-            field(job, "industries", "industry"),
-            field(job, "salaryInfo", "salary_info", "salaryInsights", "salary_insights"),
             field(job, "applicantsCount", "applicants_count"),
-            field(job, "benefits"),
-            field(job, "workplaceTypes", "workplace_types"),
-            field(job, "workRemoteAllowed", "work_remote_allowed"),
             ", ".join(job.get("keywords_matched", [])),
             hyperlink_formula(linkedin_url, "Open LinkedIn"),
             hyperlink_formula(apply_url, "Open Apply"),
             hyperlink_formula(field(job, "companyWebsite", "company_website"), "Open Company"),
-            field(job, "companyEmployeesCount", "company_employees_count"),
-            field(job, "jobPosterName", "job_poster_name"),
-            field(job, "jobPosterTitle", "job_poster_title"),
-            field(job, "descriptionText", "description_text"),
         ])
     return rows
 
