@@ -113,28 +113,18 @@ Add this line (runs at 8am daily):
 
 | Column | Description |
 |---|---|
-| # | Row number |
+| Application Status | Google Sheets dropdown: applied, rejected, interview, accepted |
+| App | Source app, such as LinkedIn or Indeed |
 | Job Title | Position name |
 | Company | Employer name |
 | Location | City / region |
-| Job Type | Full-time / Part-time / Internship |
-| Posted | When posted |
-| Experience Level | Entry level etc. |
-| Job Function | Department or discipline |
-| Industries | Job industries |
-| Salary | Salary or salary insights if available |
+| Job Type | Google Sheets dropdown: part-time or full-time |
+| Posted | Europe/Berlin date and time, formatted as a date-time column in Google Sheets |
+| Experience Level | Google Sheets dropdown: entry level or not applicable |
 | Applicants | Applicant count if visible |
-| Benefits | LinkedIn insight tags |
-| Workplace Types | On-site / remote / hybrid info if available |
-| Remote Allowed | Whether remote work is allowed |
 | Keywords Matched | All keywords that returned this job |
-| LinkedIn URL | Clickable link → opens job posting |
+| Job URL | Clickable link to the job posting |
 | Apply URL | Clickable external application link if available |
-| Company Website | Clickable company website if available |
-| Company Employees | Company employee count if available |
-| Job Poster | Recruiter/poster name if available |
-| Job Poster Title | Recruiter/poster title if available |
-| Description | Plain-text job description |
 
 ---
 
@@ -168,6 +158,7 @@ SPLIT_BY_LOCATION = False
 SPLIT_COUNTRY = "DE"
 EXCLUDED_TITLE_TERMS = ["Werkstudent"]
 DELAY_BETWEEN_REQUESTS = 0
+POSTED_TIMEZONE = "Europe/Berlin"
 EXCEL_OUTPUT_FILE = Path(__file__).with_name("jobs.xlsx")
 SPREADSHEET_TITLE = "jobs"
 ```
@@ -181,6 +172,7 @@ export APIFY_RUN_MEMORY_MB=1024
 export APIFY_RUN_TIMEOUT_SECONDS=300
 export JOBSCRAPER_DELAY_BETWEEN_REQUESTS=0
 export JOBSCRAPER_SCRAPE_COMPANY_DETAILS=false
+export JOBSCRAPER_POSTED_TIMEZONE=Europe/Berlin
 ```
 
 Recommended tuning order:

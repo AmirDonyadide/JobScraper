@@ -105,6 +105,7 @@ def load_apify_token() -> str:
 APIFY_API_TOKEN = load_apify_token()
 GOOGLE_SPREADSHEET_ID = load_setting("GOOGLE_SPREADSHEET_ID")
 SCRAPER_TIMEZONE = load_setting("JOBSCRAPER_TIMEZONE", "Europe/Rome")
+POSTED_TIMEZONE = load_setting("JOBSCRAPER_POSTED_TIMEZONE", "Europe/Berlin")
 
 try:
     SCRAPER_TZ = ZoneInfo(SCRAPER_TIMEZONE)
@@ -112,6 +113,14 @@ except ZoneInfoNotFoundError as e:
     raise RuntimeError(
         f"Timezone '{SCRAPER_TIMEZONE}' is not available. "
         "Install tzdata or set JOBSCRAPER_TIMEZONE to a valid IANA timezone."
+    ) from e
+
+try:
+    POSTED_TZ = ZoneInfo(POSTED_TIMEZONE)
+except ZoneInfoNotFoundError as e:
+    raise RuntimeError(
+        f"Timezone '{POSTED_TIMEZONE}' is not available. "
+        "Install tzdata or set JOBSCRAPER_POSTED_TIMEZONE to a valid IANA timezone."
     ) from e
 
 RUN_STARTED_AT_UTC = datetime.now(timezone.utc)
@@ -646,19 +655,51 @@ def get_job_url(job: dict) -> str:
 
 
 def get_posted(job: dict) -> str:
-    posted = first_value(
-        safe(job, "postedAt", "posted_at", "publishedAt", "published_at", "datePosted", "date_posted", "posted", "listedAt", "listed_at"),
-        format_timestamp(job.get("pubDate")),
+    posted_keys = (
+        "postedAt", "posted_at", "publishedAt", "published_at",
+        "datePosted", "date_posted", "posted", "listedAt", "listed_at",
     )
-    return posted
+    fallback = ""
+    for key in posted_keys:
+        value = job.get(key)
+        if value and str(value).strip():
+            posted_at = parse_datetime_value(value)
+            if posted_at:
+                return format_posted_datetime(posted_at)
+            if not fallback:
+                fallback = sheet_safe(value)
+
+    pub_date = job.get("pubDate")
+    posted_at = parse_datetime_value(pub_date)
+    if posted_at:
+        return format_posted_datetime(posted_at)
+    if fallback:
+        return fallback
+    return format_posted_value(pub_date)
 
 
 def get_job_type(job: dict) -> str:
     return field(job, "employmentType", "employment_type", "jobType", "job_type", "contractType", "contract_type", "type", "jobTypes")
 
 
+def get_job_type_choice(job: dict) -> str:
+    job_type = get_job_type(job).casefold()
+    if "part" in job_type:
+        return "part-time"
+    if "full" in job_type:
+        return "full-time"
+    return ""
+
+
 def get_experience(job: dict) -> str:
     return safe(job, "experienceLevel", "experience_level", "seniorityLevel", "seniority_level", "seniority")
+
+
+def get_experience_choice(job: dict) -> str:
+    experience = get_experience(job).casefold()
+    if "entry" in experience:
+        return "entry level"
+    return "not applicable"
 
 
 def get_apply_url(job: dict) -> str:
@@ -673,16 +714,52 @@ def get_company_website(job: dict) -> str:
 
 
 def format_timestamp(value) -> str:
+    posted_at = parse_datetime_value(value)
+    if posted_at:
+        return format_posted_datetime(posted_at)
+    return "N/A"
+
+
+def parse_datetime_value(value):
     if value in (None, ""):
-        return "N/A"
+        return None
     try:
         timestamp = float(value)
     except (TypeError, ValueError):
-        return sheet_safe(value)
+        timestamp = None
 
-    if timestamp > 10_000_000_000:
-        timestamp = timestamp / 1000
-    return datetime.fromtimestamp(timestamp, SCRAPER_TZ).strftime("%Y-%m-%d")
+    if timestamp is not None:
+        if timestamp > 10_000_000_000:
+            timestamp = timestamp / 1000
+        return datetime.fromtimestamp(timestamp, timezone.utc).astimezone(POSTED_TZ)
+
+    text = str(value).strip()
+    if not text or text == "N/A":
+        return None
+
+    iso_text = text
+    if iso_text.endswith("Z"):
+        iso_text = iso_text[:-1] + "+00:00"
+
+    try:
+        parsed = datetime.fromisoformat(iso_text)
+    except ValueError:
+        return None
+
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=POSTED_TZ)
+    return parsed.astimezone(POSTED_TZ)
+
+
+def format_posted_datetime(posted_at: datetime) -> str:
+    return posted_at.strftime("%Y-%m-%d %H:%M:%S")
+
+
+def format_posted_value(value) -> str:
+    posted_at = parse_datetime_value(value)
+    if posted_at:
+        return format_posted_datetime(posted_at)
+    return sheet_safe(value)
 
 
 def has_excluded_title(job: dict) -> bool:
@@ -700,10 +777,14 @@ def filter_excluded_titles(jobs: list[dict]) -> tuple[list[dict], int]:
 # ─────────────────────────────────────────────
 
 HEADER = [
-    "App", "Job Title", "Company", "Location", "Job Type", "Posted",
-    "Experience Level", "Applicants", "Keywords Matched", "Job URL",
-    "Apply URL", "Company Website",
+    "Application Status", "App", "Job Title", "Company", "Location",
+    "Job Type", "Posted", "Experience Level", "Applicants",
+    "Keywords Matched", "Job URL", "Apply URL",
 ]
+
+APPLICATION_STATUS_OPTIONS = ["applied", "rejected", "interview", "accepted"]
+JOB_TYPE_OPTIONS = ["part-time", "full-time"]
+EXPERIENCE_LEVEL_OPTIONS = ["entry level", "not applicable"]
 
 MAX_CELL_CHARS = 49000
 
@@ -756,18 +837,18 @@ def make_job_rows(jobs: list[dict]) -> list[list]:
         job_url = get_job_url(job)
         apply_url = get_apply_url(job)
         rows.append([
+            "",
             get_source_label(job),
             get_title(job),
             get_company(job),
             get_location(job),
-            get_job_type(job),
+            get_job_type_choice(job),
             get_posted(job),
-            get_experience(job),
+            get_experience_choice(job),
             field(job, "applicantsCount", "applicants_count"),
             ", ".join(job.get("keywords_matched", [])),
             hyperlink_formula(job_url, "Open Job"),
             hyperlink_formula(apply_url, "Open Apply"),
-            hyperlink_formula(get_company_website(job), "Open Company"),
         ])
     return rows
 
@@ -871,17 +952,21 @@ def export_to_excel(jobs: list[dict], filename: Path) -> str:
             if parsed:
                 cell.hyperlink = parsed[0]
 
-    for col_idx in range(1, ws.max_column + 1):
-        ws.column_dimensions[get_column_letter(col_idx)].width = 18
-    ws.column_dimensions["A"].width = 14
-    ws.column_dimensions["B"].width = 40
-    ws.column_dimensions["C"].width = 32
-    ws.column_dimensions["D"].width = 28
-    ws.column_dimensions["E"].width = 24
-    ws.column_dimensions["I"].width = 32
-    ws.column_dimensions["J"].width = 18
-    ws.column_dimensions["K"].width = 18
-    ws.column_dimensions["L"].width = 18
+    width_by_header = {
+        "Application Status": 20,
+        "App": 14,
+        "Job Title": 40,
+        "Company": 32,
+        "Location": 28,
+        "Job Type": 18,
+        "Posted": 22,
+        "Experience Level": 22,
+        "Keywords Matched": 32,
+        "Job URL": 18,
+        "Apply URL": 18,
+    }
+    for col_idx, header in enumerate(HEADER, start=1):
+        ws.column_dimensions[get_column_letter(col_idx)].width = width_by_header.get(header, 18)
 
     ws.freeze_panes = "A2"
     ws.auto_filter.ref = ws.dimensions
@@ -942,7 +1027,56 @@ def update_values(service, spreadsheet_id: str, sheet_name: str, rows: list[list
     ).execute()
 
 
+def header_index(name: str) -> int:
+    return HEADER.index(name)
+
+
+def column_range(sheet_id: int, column_name: str, end_row_index: int) -> dict:
+    column_idx = header_index(column_name)
+    return {
+        "sheetId": sheet_id,
+        "startRowIndex": 1,
+        "endRowIndex": end_row_index,
+        "startColumnIndex": column_idx,
+        "endColumnIndex": column_idx + 1,
+    }
+
+
+def dropdown_validation_request(sheet_id: int, column_name: str, options: list[str], end_row_index: int) -> dict:
+    return {
+        "setDataValidation": {
+            "range": column_range(sheet_id, column_name, end_row_index),
+            "rule": {
+                "condition": {
+                    "type": "ONE_OF_LIST",
+                    "values": [{"userEnteredValue": option} for option in options],
+                },
+                "showCustomUi": True,
+                "strict": True,
+            },
+        }
+    }
+
+
+def date_time_format_request(sheet_id: int, column_name: str, end_row_index: int) -> dict:
+    return {
+        "repeatCell": {
+            "range": column_range(sheet_id, column_name, end_row_index),
+            "cell": {
+                "userEnteredFormat": {
+                    "numberFormat": {
+                        "type": "DATE_TIME",
+                        "pattern": "yyyy-mm-dd hh:mm",
+                    }
+                }
+            },
+            "fields": "userEnteredFormat.numberFormat",
+        }
+    }
+
+
 def format_spreadsheet(service, spreadsheet_id: str, sheet_id: int, job_row_count: int):
+    editable_row_count = max(job_row_count, 1000)
     requests_body = [
         {
             "updateSheetProperties": {
@@ -996,6 +1130,25 @@ def format_spreadsheet(service, spreadsheet_id: str, sheet_id: int, job_row_coun
                 }
             }
         },
+        dropdown_validation_request(
+            sheet_id,
+            "Application Status",
+            APPLICATION_STATUS_OPTIONS,
+            editable_row_count,
+        ),
+        dropdown_validation_request(
+            sheet_id,
+            "Job Type",
+            JOB_TYPE_OPTIONS,
+            editable_row_count,
+        ),
+        dropdown_validation_request(
+            sheet_id,
+            "Experience Level",
+            EXPERIENCE_LEVEL_OPTIONS,
+            editable_row_count,
+        ),
+        date_time_format_request(sheet_id, "Posted", editable_row_count),
     ]
 
     service.spreadsheets().batchUpdate(
@@ -1143,6 +1296,7 @@ def main():
     print(f"  Search source: {search_source}")
     print(f"  Output mode: {', '.join(sorted(output_modes))}")
     print(f"  Timezone: {SCRAPER_TIMEZONE}")
+    print(f"  Posted timezone: {POSTED_TIMEZONE}")
     print(f"  Searches: {len(searches)}")
     print(f"  Search concurrency: {SEARCH_CONCURRENCY}")
     print(f"  Apify child run memory: {APIFY_RUN_MEMORY_MB} MB")
