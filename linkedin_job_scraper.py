@@ -139,7 +139,7 @@ INDEED_MAX_RESULTS_PER_SEARCH = load_int_setting("INDEED_MAX_RESULTS_PER_SEARCH"
 SEARCH_CONCURRENCY = max(1, load_int_setting("JOBSCRAPER_SEARCH_CONCURRENCY", 14))
 
 # Apify settings for the child actor runs started by this script.
-APIFY_RUN_MEMORY_MB = max(128, load_int_setting("APIFY_RUN_MEMORY_MB", 1024))
+APIFY_RUN_MEMORY_MB = max(128, load_int_setting("APIFY_RUN_MEMORY_MB", 512))
 APIFY_RUN_TIMEOUT_SECONDS = max(60, load_int_setting("APIFY_RUN_TIMEOUT_SECONDS", 300))
 APIFY_CLIENT_TIMEOUT_SECONDS = max(
     APIFY_RUN_TIMEOUT_SECONDS + 30,
