@@ -21,6 +21,7 @@ import os
 import time
 import requests
 import openpyxl
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlencode
@@ -86,6 +87,16 @@ def load_int_setting(name: str, default: int) -> int:
         return default
 
 
+def load_bool_setting(name: str, default: bool) -> bool:
+    value = load_setting(name, str(default).lower()).lower()
+    if value in {"1", "true", "yes", "y", "on"}:
+        return True
+    if value in {"0", "false", "no", "n", "off"}:
+        return False
+    print(f"⚠ Invalid boolean for {name}='{value}', using {default}.")
+    return default
+
+
 def load_apify_token() -> str:
     """Load the Apify token from the environment first, then from local .env."""
     return load_setting(TOKEN_ENV_VAR)
@@ -112,11 +123,22 @@ LINKEDIN_ACTOR_ID = "curious_coder~linkedin-jobs-scraper"
 INDEED_ACTOR_ID = "misceres~indeed-scraper"
 
 # Max jobs to fetch per search URL (increase if you want more, costs more credits)
-MAX_RESULTS_PER_SEARCH = 500
+MAX_RESULTS_PER_SEARCH = load_int_setting("JOBSCRAPER_MAX_RESULTS_PER_SEARCH", 500)
 INDEED_MAX_RESULTS_PER_SEARCH = load_int_setting("INDEED_MAX_RESULTS_PER_SEARCH", MAX_RESULTS_PER_SEARCH)
 
-# Seconds to wait between keyword requests (be polite to the API)
-DELAY_BETWEEN_REQUESTS = 3
+# Run multiple keyword searches at the same time. This is the main speed knob.
+SEARCH_CONCURRENCY = max(1, load_int_setting("JOBSCRAPER_SEARCH_CONCURRENCY", 4))
+
+# Apify settings for the child actor runs started by this script.
+APIFY_RUN_MEMORY_MB = max(128, load_int_setting("APIFY_RUN_MEMORY_MB", 512))
+APIFY_RUN_TIMEOUT_SECONDS = max(60, load_int_setting("APIFY_RUN_TIMEOUT_SECONDS", 300))
+APIFY_CLIENT_TIMEOUT_SECONDS = max(
+    APIFY_RUN_TIMEOUT_SECONDS + 30,
+    load_int_setting("APIFY_CLIENT_TIMEOUT_SECONDS", APIFY_RUN_TIMEOUT_SECONDS + 60),
+)
+
+# Optional seconds to wait before starting another keyword request.
+DELAY_BETWEEN_REQUESTS = max(0, load_int_setting("JOBSCRAPER_DELAY_BETWEEN_REQUESTS", 0))
 
 # Choose: "linkedin", "indeed", or "both"
 SOURCE_MODE = load_setting("JOBSCRAPER_SOURCES", "linkedin").lower()
@@ -146,16 +168,16 @@ GEO_ID = "101282230"
 PUBLISHED_AT = "r86400"
 EXPERIENCE_LEVELS = ["1", "2"]
 CONTRACT_TYPES = ["F", "P", "I"]
-SCRAPE_COMPANY_DETAILS = True
-USE_INCOGNITO_MODE = True
-SPLIT_BY_LOCATION = False
+SCRAPE_COMPANY_DETAILS = load_bool_setting("JOBSCRAPER_SCRAPE_COMPANY_DETAILS", True)
+USE_INCOGNITO_MODE = load_bool_setting("JOBSCRAPER_USE_INCOGNITO_MODE", True)
+SPLIT_BY_LOCATION = load_bool_setting("JOBSCRAPER_SPLIT_BY_LOCATION", False)
 SPLIT_COUNTRY = "DE"
 EXCLUDED_TITLE_TERMS = ["Werkstudent"]
 
 INDEED_COUNTRY = load_setting("INDEED_COUNTRY", "DE").upper()
 INDEED_LOCATION = load_setting("INDEED_LOCATION", LOCATION)
 INDEED_MAX_CONCURRENCY = load_int_setting("INDEED_MAX_CONCURRENCY", 5)
-INDEED_SAVE_ONLY_UNIQUE_ITEMS = load_setting("INDEED_SAVE_ONLY_UNIQUE_ITEMS", "true").lower() in {"1", "true", "yes", "y"}
+INDEED_SAVE_ONLY_UNIQUE_ITEMS = load_bool_setting("INDEED_SAVE_ONLY_UNIQUE_ITEMS", True)
 
 # ─────────────────────────────────────────────
 #  KEYWORDS
@@ -349,8 +371,8 @@ def annotate_jobs(jobs: list[dict], source: str, source_label: str) -> list[dict
 def run_actor(actor_id: str, payload: dict, max_items: int) -> list[dict]:
     url = f"https://api.apify.com/v2/acts/{actor_id}/run-sync-get-dataset-items"
     params = {
-        "timeout": 300,
-        "memory": 512,
+        "timeout": APIFY_RUN_TIMEOUT_SECONDS,
+        "memory": APIFY_RUN_MEMORY_MB,
         "maxItems": max_items,
     }
 
@@ -359,7 +381,7 @@ def run_actor(actor_id: str, payload: dict, max_items: int) -> list[dict]:
         params=params,
         headers=apify_headers(),
         json=payload,
-        timeout=180,
+        timeout=APIFY_CLIENT_TIMEOUT_SECONDS,
     )
 
     if response.status_code in (401, 403):
@@ -409,6 +431,93 @@ def fetch_jobs_for_search(search: dict) -> list[dict]:
     except Exception as e:
         print(f"  ⚠ Unexpected error for search '{label}': {e} — skipping.")
         return []
+
+
+def run_all_searches(searches: list[dict]) -> tuple[list[tuple[str, list]], list[str], dict[str, str], list[str]]:
+    """
+    Run keyword searches concurrently while preserving the original result order.
+
+    Parallelizing here overlaps separate Apify actor runs. This mostly improves
+    wall-clock time, while APIFY_RUN_MEMORY_MB controls each child run's memory.
+    """
+    all_results: list[tuple[int, str, list]] = []
+    zero_searches: list[str] = []
+    failed_sources: dict[str, str] = {}
+    skipped_searches: list[str] = []
+
+    max_workers = min(SEARCH_CONCURRENCY, len(searches))
+    submitted_count = 0
+
+    print(f"\nRunning up to {max_workers} search(es) in parallel ...")
+
+    def submit_next(executor, search_iter, in_flight):
+        nonlocal submitted_count
+        while len(in_flight) < max_workers:
+            try:
+                idx, search = next(search_iter)
+            except StopIteration:
+                return
+
+            label = search["display_label"]
+            source = search["source"]
+            source_label = search["source_label"]
+
+            if source in failed_sources:
+                print(f"\n[{idx:02d}/{len(searches)}] Search: '{label}'")
+                print(f"  → Skipped because {source_label} failed earlier in this run.")
+                skipped_searches.append(label)
+                continue
+
+            if DELAY_BETWEEN_REQUESTS and submitted_count:
+                time.sleep(DELAY_BETWEEN_REQUESTS)
+
+            print(f"\n[{idx:02d}/{len(searches)}] Search: '{label}'")
+            print(f"  → Calling Apify actor {search['actor_id']} ...")
+            future = executor.submit(fetch_jobs_for_search, search)
+            in_flight[future] = (idx, search)
+            submitted_count += 1
+
+    search_iter = iter(enumerate(searches, start=1))
+
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        in_flight = {}
+        submit_next(executor, search_iter, in_flight)
+
+        while in_flight:
+            for future in as_completed(tuple(in_flight)):
+                idx, search = in_flight.pop(future)
+                label = search["display_label"]
+                keyword = search["keyword"]
+                source = search["source"]
+                source_label = search["source_label"]
+
+                try:
+                    jobs = future.result()
+                except ApifyConfigurationError as e:
+                    if source not in failed_sources:
+                        print(f"\n❌ {e}")
+                        print(
+                            f"   Continuing with any results from other sources. "
+                            f"Remaining {source_label} searches will be skipped."
+                        )
+                        failed_sources[source] = str(e)
+                    skipped_searches.append(label)
+                else:
+                    all_results.append((idx, keyword, jobs))
+                    if jobs:
+                        print(f"  ✓ Completed '{label}': {len(jobs)} job(s) found")
+                    else:
+                        print(f"  — Completed '{label}': 0 results")
+                        zero_searches.append(label)
+
+                submit_next(executor, search_iter, in_flight)
+                break
+
+    ordered_results = [
+        (keyword, jobs)
+        for _, keyword, jobs in sorted(all_results, key=lambda item: item[0])
+    ]
+    return ordered_results, zero_searches, failed_sources, skipped_searches
 
 
 # ─────────────────────────────────────────────
@@ -1035,10 +1144,16 @@ def main():
     print(f"  Output mode: {', '.join(sorted(output_modes))}")
     print(f"  Timezone: {SCRAPER_TIMEZONE}")
     print(f"  Searches: {len(searches)}")
+    print(f"  Search concurrency: {SEARCH_CONCURRENCY}")
+    print(f"  Apify child run memory: {APIFY_RUN_MEMORY_MB} MB")
+    print(f"  Apify child run timeout: {APIFY_RUN_TIMEOUT_SECONDS}s")
+    if DELAY_BETWEEN_REQUESTS:
+        print(f"  Delay between starting searches: {DELAY_BETWEEN_REQUESTS}s")
     if "linkedin" in job_sources:
         print(f"  LinkedIn job types: {', '.join(CONTRACT_TYPES)}")
         print(f"  LinkedIn experience levels: {', '.join(EXPERIENCE_LEVELS)}")
         print(f"  LinkedIn max results/search: {MAX_RESULTS_PER_SEARCH}")
+        print(f"  LinkedIn scrape company details: {SCRAPE_COMPANY_DETAILS}")
     if "indeed" in job_sources:
         print(f"  Indeed country/location: {INDEED_COUNTRY.upper()} / {INDEED_LOCATION}")
         print(f"  Indeed max results/search: {INDEED_MAX_RESULTS_PER_SEARCH}")
@@ -1046,44 +1161,7 @@ def main():
         print(f"  Indeed save unique only: {INDEED_SAVE_ONLY_UNIQUE_ITEMS}")
     print("=" * 60)
 
-    all_results:   list[tuple[str, list]] = []
-    zero_searches: list[str]       = []
-    failed_sources: dict[str, str] = {}
-    skipped_searches: list[str] = []
-
-    for idx, search in enumerate(searches, start=1):
-        label = search["display_label"]
-        keyword = search["keyword"]
-        source = search["source"]
-        source_label = search["source_label"]
-        print(f"\n[{idx:02d}/{len(searches)}] Search: '{label}'")
-
-        if source in failed_sources:
-            print(f"  → Skipped because {source_label} failed earlier in this run.")
-            skipped_searches.append(label)
-            continue
-
-        print(f"  → Calling Apify actor {search['actor_id']} ...", end=" ", flush=True)
-
-        try:
-            jobs = fetch_jobs_for_search(search)
-        except ApifyConfigurationError as e:
-            print(f"\n❌ {e}")
-            print(f"   Continuing with any results from other sources. Remaining {source_label} searches will be skipped.")
-            failed_sources[source] = str(e)
-            skipped_searches.append(label)
-            continue
-
-        all_results.append((keyword, jobs))
-
-        if jobs:
-            print(f"✓ {len(jobs)} job(s) found")
-        else:
-            print(f"— 0 results")
-            zero_searches.append(label)
-
-        if idx < len(searches):
-            time.sleep(DELAY_BETWEEN_REQUESTS)
+    all_results, zero_searches, failed_sources, skipped_searches = run_all_searches(searches)
 
     # ── Deduplicate ──────────────────────────────
     print("\n" + "─" * 60)

@@ -154,6 +154,9 @@ All settings are at the top of `linkedin_job_scraper.py`:
 
 ```python
 MAX_RESULTS_PER_SEARCH = 500  # increase for more results (uses more credits)
+SEARCH_CONCURRENCY = 4  # run this many keyword searches at the same time
+APIFY_RUN_MEMORY_MB = 512  # memory for each child Apify actor run
+APIFY_RUN_TIMEOUT_SECONDS = 300
 OUTPUT_MODE = "excel"  # choose: excel, google_sheets, both
 CONTRACT_TYPES = ["F", "P", "I"]  # full-time, part-time, internship
 EXPERIENCE_LEVELS = ["1", "2"]  # internship, entry level
@@ -164,18 +167,43 @@ USE_INCOGNITO_MODE = True
 SPLIT_BY_LOCATION = False
 SPLIT_COUNTRY = "DE"
 EXCLUDED_TITLE_TERMS = ["Werkstudent"]
-DELAY_BETWEEN_REQUESTS = 3
+DELAY_BETWEEN_REQUESTS = 0
 EXCEL_OUTPUT_FILE = Path(__file__).with_name("jobs.xlsx")
 SPREADSHEET_TITLE = "jobs"
 ```
+
+The most useful speed settings can also be overridden from the terminal or from
+Apify environment variables:
+
+```bash
+export JOBSCRAPER_SEARCH_CONCURRENCY=4
+export APIFY_RUN_MEMORY_MB=1024
+export APIFY_RUN_TIMEOUT_SECONDS=300
+export JOBSCRAPER_DELAY_BETWEEN_REQUESTS=0
+export JOBSCRAPER_SCRAPE_COMPANY_DETAILS=false
+```
+
+Recommended tuning order:
+
+1. Start with `JOBSCRAPER_SEARCH_CONCURRENCY=4`.
+2. If the Apify account allows more simultaneous runs, try `6` or `8`.
+3. Increase `APIFY_RUN_MEMORY_MB` only if the child actor is memory-limited.
+4. Set `JOBSCRAPER_SCRAPE_COMPANY_DETAILS=false` if speed matters more than company metadata.
 
 To add/remove keywords, edit the `KEYWORDS` list.
 To change location, edit `LOCATION`.
 
 ---
 
-## Apify usage
+## Apify usage and speed
 
 The selected actor is priced per result. The default setup runs each search
 with up to 500 jobs each, so check your Apify Console before
 increasing limits.
+
+This script mostly waits for Apify actor runs to finish, so the local process can
+show low RAM usage even on an 8 GB Apify container. The biggest speed gain comes
+from `JOBSCRAPER_SEARCH_CONCURRENCY`, because it starts multiple keyword searches
+at once. `APIFY_RUN_MEMORY_MB` controls the memory assigned to each child actor
+run started through the Apify API; it is separate from the memory assigned to the
+container running this script.
