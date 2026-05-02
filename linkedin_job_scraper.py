@@ -109,7 +109,7 @@ RUN_SHEET_NAME = RUN_STARTED_AT.strftime("%Y-%m-%d %H-%M-%S")
 
 # Apify actors. Apify's raw REST API uses "~" between username and actor name.
 LINKEDIN_ACTOR_ID = "curious_coder~linkedin-jobs-scraper"
-INDEED_ACTOR_ID = "curious_coder~indeed-scraper"
+INDEED_ACTOR_ID = "misceres~indeed-scraper"
 
 # Max jobs to fetch per search URL (increase if you want more, costs more credits)
 MAX_RESULTS_PER_SEARCH = 500
@@ -152,15 +152,10 @@ SPLIT_BY_LOCATION = False
 SPLIT_COUNTRY = "DE"
 EXCLUDED_TITLE_TERMS = ["Werkstudent"]
 
-INDEED_COUNTRY = load_setting("INDEED_COUNTRY", "de").lower()
+INDEED_COUNTRY = load_setting("INDEED_COUNTRY", "DE").upper()
 INDEED_LOCATION = load_setting("INDEED_LOCATION", LOCATION)
-INDEED_RADIUS_KM = load_int_setting("INDEED_RADIUS_KM", 25)
-INDEED_POSTED_WITHIN_DAYS = load_setting("INDEED_POSTED_WITHIN_DAYS", "1")
-INDEED_SCRAPE_COMPANY_DETAILS = load_setting("INDEED_SCRAPE_COMPANY_DETAILS", "true").lower() in {"1", "true", "yes", "y"}
-
-if INDEED_POSTED_WITHIN_DAYS not in {"", "1", "3", "7", "14"}:
-    print(f"⚠ Invalid INDEED_POSTED_WITHIN_DAYS='{INDEED_POSTED_WITHIN_DAYS}', using 1.")
-    INDEED_POSTED_WITHIN_DAYS = "1"
+INDEED_MAX_CONCURRENCY = load_int_setting("INDEED_MAX_CONCURRENCY", 5)
+INDEED_SAVE_ONLY_UNIQUE_ITEMS = load_setting("INDEED_SAVE_ONLY_UNIQUE_ITEMS", "true").lower() in {"1", "true", "yes", "y"}
 
 # ─────────────────────────────────────────────
 #  KEYWORDS
@@ -251,7 +246,8 @@ INDEED_DOMAIN_BY_COUNTRY = {
 
 
 def indeed_base_url() -> str:
-    domain = INDEED_DOMAIN_BY_COUNTRY.get(INDEED_COUNTRY, f"{INDEED_COUNTRY}.indeed.com")
+    country_key = INDEED_COUNTRY.lower()
+    domain = INDEED_DOMAIN_BY_COUNTRY.get(country_key, f"{country_key}.indeed.com")
     return f"https://{domain}"
 
 
@@ -269,18 +265,6 @@ def build_linkedin_search_url(keyword: str) -> str:
     return f"https://www.linkedin.com/jobs/search/?{urlencode(params)}"
 
 
-def build_indeed_search_url(keyword: str) -> str:
-    params = {
-        "q": keyword,
-        "l": INDEED_LOCATION,
-        "radius": str(INDEED_RADIUS_KM),
-        "sort": "date",
-    }
-    if INDEED_POSTED_WITHIN_DAYS:
-        params["fromage"] = INDEED_POSTED_WITHIN_DAYS
-    return f"{indeed_base_url()}/jobs?{urlencode(params)}"
-
-
 def build_linkedin_actor_input(search_url: str) -> dict:
     payload = {
         "urls": [search_url],
@@ -294,13 +278,14 @@ def build_linkedin_actor_input(search_url: str) -> dict:
     return payload
 
 
-def build_indeed_actor_input(search_url: str) -> dict:
+def build_indeed_actor_input(keyword: str) -> dict:
     return {
-        "scrapeJobs.searchUrl": search_url,
-        "scrapeJobs.scrapeCompany": INDEED_SCRAPE_COMPANY_DETAILS,
-        "count": INDEED_MAX_RESULTS_PER_SEARCH,
-        "outputSchema": "raw",
-        "skipSimilarJobs": False,
+        "country": INDEED_COUNTRY,
+        "location": INDEED_LOCATION,
+        "maxConcurrency": INDEED_MAX_CONCURRENCY,
+        "maxItems": INDEED_MAX_RESULTS_PER_SEARCH,
+        "position": keyword,
+        "saveOnlyUniqueItems": INDEED_SAVE_ONLY_UNIQUE_ITEMS,
     }
 
 
@@ -343,7 +328,7 @@ def get_searches(sources: list[str]) -> tuple[str, list[dict]]:
                 "keyword": keyword,
                 "display_label": f"Indeed / {keyword}",
                 "actor_id": INDEED_ACTOR_ID,
-                "payload": build_indeed_actor_input(build_indeed_search_url(keyword)),
+                "payload": build_indeed_actor_input(keyword),
                 "max_items": INDEED_MAX_RESULTS_PER_SEARCH,
             })
 
@@ -497,7 +482,7 @@ def get_source_label(job: dict) -> str:
 
 
 def get_title(job: dict) -> str:
-    return safe(job, "title", "jobTitle", "job_title", "name")
+    return safe(job, "title", "positionName", "jobTitle", "job_title", "name")
 
 
 def get_company(job: dict) -> str:
@@ -568,7 +553,7 @@ def get_experience(job: dict) -> str:
 
 
 def get_apply_url(job: dict) -> str:
-    return field(job, "applyUrl", "apply_url", "originalApplyUrl", "thirdPartyApplyUrl")
+    return field(job, "applyUrl", "apply_url", "originalApplyUrl", "thirdPartyApplyUrl", "externalApplyLink")
 
 
 def get_company_website(job: dict) -> str:
@@ -1056,25 +1041,38 @@ def main():
         print(f"  LinkedIn max results/search: {MAX_RESULTS_PER_SEARCH}")
     if "indeed" in job_sources:
         print(f"  Indeed country/location: {INDEED_COUNTRY.upper()} / {INDEED_LOCATION}")
-        print(f"  Indeed posted within days: {INDEED_POSTED_WITHIN_DAYS or 'any'}")
         print(f"  Indeed max results/search: {INDEED_MAX_RESULTS_PER_SEARCH}")
+        print(f"  Indeed max concurrency: {INDEED_MAX_CONCURRENCY}")
+        print(f"  Indeed save unique only: {INDEED_SAVE_ONLY_UNIQUE_ITEMS}")
     print("=" * 60)
 
     all_results:   list[tuple[str, list]] = []
     zero_searches: list[str]       = []
+    failed_sources: dict[str, str] = {}
+    skipped_searches: list[str] = []
 
     for idx, search in enumerate(searches, start=1):
         label = search["display_label"]
         keyword = search["keyword"]
+        source = search["source"]
+        source_label = search["source_label"]
         print(f"\n[{idx:02d}/{len(searches)}] Search: '{label}'")
+
+        if source in failed_sources:
+            print(f"  → Skipped because {source_label} failed earlier in this run.")
+            skipped_searches.append(label)
+            continue
+
         print(f"  → Calling Apify actor {search['actor_id']} ...", end=" ", flush=True)
 
         try:
             jobs = fetch_jobs_for_search(search)
         except ApifyConfigurationError as e:
             print(f"\n❌ {e}")
-            print("   Fix the issue above, then run the script again.")
-            return
+            print(f"   Continuing with any results from other sources. Remaining {source_label} searches will be skipped.")
+            failed_sources[source] = str(e)
+            skipped_searches.append(label)
+            continue
 
         all_results.append((keyword, jobs))
 
@@ -1135,6 +1133,13 @@ def main():
         print(f"  Searches with 0 results ({len(zero_searches)}):")
         for label in zero_searches:
             print(f"    • {label}")
+    if failed_sources:
+        print(f"  Failed source(s) ({len(failed_sources)}):")
+        for source, message in failed_sources.items():
+            source_label = SOURCE_DISPLAY_NAMES.get(source, source.title())
+            print(f"    • {source_label}: {message[:180]}")
+    if skipped_searches:
+        print(f"  Skipped searches after source failure: {len(skipped_searches)}")
     for label, destination in outputs:
         print(f"  {label}: {destination}")
     print("=" * 60)
