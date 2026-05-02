@@ -137,6 +137,14 @@ jobs:
           echo "Output mode: ${JOBSCRAPER_OUTPUT_MODE}"
           echo "Scraper timezone: ${JOBSCRAPER_TIMEZONE}"
 
+          python - <<'PY'
+          from datetime import datetime, timezone
+          from zoneinfo import ZoneInfo
+
+          local_time = datetime.now(timezone.utc).astimezone(ZoneInfo("Europe/Rome"))
+          print("Python Europe/Rome time check:", local_time.strftime("%Y-%m-%d %H:%M:%S %Z"))
+          PY
+
           python -u linkedin_job_scraper.py 2>&1 | tee scraper.log
           status=${PIPESTATUS[0]}
 

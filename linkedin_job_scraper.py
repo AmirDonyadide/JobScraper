@@ -20,7 +20,7 @@ import os
 import time
 import requests
 import openpyxl
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlencode
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -87,11 +87,14 @@ SCRAPER_TIMEZONE = load_setting("JOBSCRAPER_TIMEZONE", "Europe/Rome")
 
 try:
     SCRAPER_TZ = ZoneInfo(SCRAPER_TIMEZONE)
-except ZoneInfoNotFoundError:
-    SCRAPER_TIMEZONE = "UTC"
-    SCRAPER_TZ = ZoneInfo("UTC")
+except ZoneInfoNotFoundError as e:
+    raise RuntimeError(
+        f"Timezone '{SCRAPER_TIMEZONE}' is not available. "
+        "Install tzdata or set JOBSCRAPER_TIMEZONE to a valid IANA timezone."
+    ) from e
 
-RUN_STARTED_AT = datetime.now(SCRAPER_TZ)
+RUN_STARTED_AT_UTC = datetime.now(timezone.utc)
+RUN_STARTED_AT = RUN_STARTED_AT_UTC.astimezone(SCRAPER_TZ)
 RUN_SHEET_NAME = RUN_STARTED_AT.strftime("%Y-%m-%d %H-%M-%S")
 
 # Apify actor for LinkedIn Jobs (Curious Coder scraper)
@@ -829,6 +832,7 @@ def main():
 
     print("=" * 60)
     print(f"  LinkedIn Job Scraper — {RUN_STARTED_AT.strftime('%Y-%m-%d %H:%M %Z')}")
+    print(f"  UTC start time: {RUN_STARTED_AT_UTC.strftime('%Y-%m-%d %H:%M UTC')}")
     print(f"  Actor: {ACTOR_ID}")
     print(f"  Search source: {search_source}")
     print(f"  Output mode: {', '.join(sorted(output_modes))}")
