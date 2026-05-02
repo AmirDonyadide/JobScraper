@@ -10,9 +10,10 @@ Requirements:
 
 Usage:
     1. Put APIFY_API_TOKEN in .env (or set it as an environment variable)
-    2. Optional: set JOBSCRAPER_OUTPUT_MODE to excel, google_sheets, or both
-    3. Run: python linkedin_job_scraper.py
-    4. Open the printed output path or Google Sheet URL
+    2. Optional: set JOBSCRAPER_SOURCES to linkedin, indeed, or both
+    3. Optional: set JOBSCRAPER_OUTPUT_MODE to excel, google_sheets, or both
+    4. Run: python linkedin_job_scraper.py
+    5. Open the printed output path or Google Sheet URL
 """
 
 import json
@@ -76,6 +77,15 @@ def load_setting(name: str, default: str = "") -> str:
     return os.environ.get(name, LOCAL_ENV.get(name, default)).strip()
 
 
+def load_int_setting(name: str, default: int) -> int:
+    value = load_setting(name, str(default))
+    try:
+        return int(value)
+    except ValueError:
+        print(f"⚠ Invalid integer for {name}='{value}', using {default}.")
+        return default
+
+
 def load_apify_token() -> str:
     """Load the Apify token from the environment first, then from local .env."""
     return load_setting(TOKEN_ENV_VAR)
@@ -97,15 +107,23 @@ RUN_STARTED_AT_UTC = datetime.now(timezone.utc)
 RUN_STARTED_AT = RUN_STARTED_AT_UTC.astimezone(SCRAPER_TZ)
 RUN_SHEET_NAME = RUN_STARTED_AT.strftime("%Y-%m-%d %H-%M-%S")
 
-# Apify actor for LinkedIn Jobs (Curious Coder scraper)
-# Apify's raw REST API uses "~" between username and actor name.
-ACTOR_ID = "curious_coder~linkedin-jobs-scraper"
+# Apify actors. Apify's raw REST API uses "~" between username and actor name.
+LINKEDIN_ACTOR_ID = "curious_coder~linkedin-jobs-scraper"
+INDEED_ACTOR_ID = "curious_coder~indeed-scraper"
 
 # Max jobs to fetch per search URL (increase if you want more, costs more credits)
 MAX_RESULTS_PER_SEARCH = 500
+INDEED_MAX_RESULTS_PER_SEARCH = load_int_setting("INDEED_MAX_RESULTS_PER_SEARCH", MAX_RESULTS_PER_SEARCH)
 
 # Seconds to wait between keyword requests (be polite to the API)
 DELAY_BETWEEN_REQUESTS = 3
+
+# Choose: "linkedin", "indeed", or "both"
+SOURCE_MODE = load_setting("JOBSCRAPER_SOURCES", "linkedin").lower()
+SOURCE_DISPLAY_NAMES = {
+    "linkedin": "LinkedIn",
+    "indeed": "Indeed",
+}
 
 # Choose: "excel", "google_sheets", or "both"
 OUTPUT_MODE = load_setting("JOBSCRAPER_OUTPUT_MODE", "excel").lower()
@@ -133,6 +151,16 @@ USE_INCOGNITO_MODE = True
 SPLIT_BY_LOCATION = False
 SPLIT_COUNTRY = "DE"
 EXCLUDED_TITLE_TERMS = ["Werkstudent"]
+
+INDEED_COUNTRY = load_setting("INDEED_COUNTRY", "de").lower()
+INDEED_LOCATION = load_setting("INDEED_LOCATION", LOCATION)
+INDEED_RADIUS_KM = load_int_setting("INDEED_RADIUS_KM", 25)
+INDEED_POSTED_WITHIN_DAYS = load_setting("INDEED_POSTED_WITHIN_DAYS", "1")
+INDEED_SCRAPE_COMPANY_DETAILS = load_setting("INDEED_SCRAPE_COMPANY_DETAILS", "true").lower() in {"1", "true", "yes", "y"}
+
+if INDEED_POSTED_WITHIN_DAYS not in {"", "1", "3", "7", "14"}:
+    print(f"⚠ Invalid INDEED_POSTED_WITHIN_DAYS='{INDEED_POSTED_WITHIN_DAYS}', using 1.")
+    INDEED_POSTED_WITHIN_DAYS = "1"
 
 # ─────────────────────────────────────────────
 #  KEYWORDS
@@ -206,7 +234,28 @@ def apify_error_message(response: requests.Response) -> str:
     return str(data)[:500]
 
 
-def build_search_url(keyword: str) -> str:
+INDEED_DOMAIN_BY_COUNTRY = {
+    "us": "www.indeed.com",
+    "gb": "uk.indeed.com",
+    "uk": "uk.indeed.com",
+    "de": "de.indeed.com",
+    "at": "at.indeed.com",
+    "ch": "ch.indeed.com",
+    "fr": "fr.indeed.com",
+    "nl": "nl.indeed.com",
+    "it": "it.indeed.com",
+    "es": "es.indeed.com",
+    "ca": "ca.indeed.com",
+    "au": "au.indeed.com",
+}
+
+
+def indeed_base_url() -> str:
+    domain = INDEED_DOMAIN_BY_COUNTRY.get(INDEED_COUNTRY, f"{INDEED_COUNTRY}.indeed.com")
+    return f"https://{domain}"
+
+
+def build_linkedin_search_url(keyword: str) -> str:
     params = {
         "keywords": keyword,
         "location": LOCATION,
@@ -220,12 +269,19 @@ def build_search_url(keyword: str) -> str:
     return f"https://www.linkedin.com/jobs/search/?{urlencode(params)}"
 
 
-def get_searches() -> tuple[str, list[tuple[str, str]]]:
-    generated_searches = [(keyword, build_search_url(keyword)) for keyword in KEYWORDS]
-    return "generated keyword URLs", generated_searches
+def build_indeed_search_url(keyword: str) -> str:
+    params = {
+        "q": keyword,
+        "l": INDEED_LOCATION,
+        "radius": str(INDEED_RADIUS_KM),
+        "sort": "date",
+    }
+    if INDEED_POSTED_WITHIN_DAYS:
+        params["fromage"] = INDEED_POSTED_WITHIN_DAYS
+    return f"{indeed_base_url()}/jobs?{urlencode(params)}"
 
 
-def build_actor_input(search_url: str) -> dict:
+def build_linkedin_actor_input(search_url: str) -> dict:
     payload = {
         "urls": [search_url],
         "count": MAX_RESULTS_PER_SEARCH,
@@ -238,12 +294,79 @@ def build_actor_input(search_url: str) -> dict:
     return payload
 
 
-def run_actor(payload: dict) -> list[dict]:
-    url = f"https://api.apify.com/v2/acts/{ACTOR_ID}/run-sync-get-dataset-items"
+def build_indeed_actor_input(search_url: str) -> dict:
+    return {
+        "scrapeJobs.searchUrl": search_url,
+        "scrapeJobs.scrapeCompany": INDEED_SCRAPE_COMPANY_DETAILS,
+        "count": INDEED_MAX_RESULTS_PER_SEARCH,
+        "outputSchema": "raw",
+        "skipSimilarJobs": False,
+    }
+
+
+def parse_job_sources() -> list[str]:
+    aliases = {
+        "linkedin": {"linkedin"},
+        "li": {"linkedin"},
+        "indeed": {"indeed"},
+        "both": {"linkedin", "indeed"},
+        "all": {"linkedin", "indeed"},
+    }
+    selected = aliases.get(SOURCE_MODE)
+    if not selected:
+        print(f"⚠ Unknown JOBSCRAPER_SOURCES '{SOURCE_MODE}', using LinkedIn only.")
+        selected = {"linkedin"}
+
+    return [source for source in ("linkedin", "indeed") if source in selected]
+
+
+def get_searches(sources: list[str]) -> tuple[str, list[dict]]:
+    searches = []
+
+    if "linkedin" in sources:
+        for keyword in KEYWORDS:
+            searches.append({
+                "source": "linkedin",
+                "source_label": "LinkedIn",
+                "keyword": keyword,
+                "display_label": f"LinkedIn / {keyword}",
+                "actor_id": LINKEDIN_ACTOR_ID,
+                "payload": build_linkedin_actor_input(build_linkedin_search_url(keyword)),
+                "max_items": MAX_RESULTS_PER_SEARCH,
+            })
+
+    if "indeed" in sources:
+        for keyword in KEYWORDS:
+            searches.append({
+                "source": "indeed",
+                "source_label": "Indeed",
+                "keyword": keyword,
+                "display_label": f"Indeed / {keyword}",
+                "actor_id": INDEED_ACTOR_ID,
+                "payload": build_indeed_actor_input(build_indeed_search_url(keyword)),
+                "max_items": INDEED_MAX_RESULTS_PER_SEARCH,
+            })
+
+    source_labels = ", ".join(SOURCE_DISPLAY_NAMES.get(source, source.title()) for source in sources)
+    return f"generated {source_labels} keyword URLs", searches
+
+
+def annotate_jobs(jobs: list[dict], source: str, source_label: str) -> list[dict]:
+    annotated = []
+    for job in jobs:
+        job_copy = dict(job)
+        job_copy["_source"] = source
+        job_copy["_source_label"] = source_label
+        annotated.append(job_copy)
+    return annotated
+
+
+def run_actor(actor_id: str, payload: dict, max_items: int) -> list[dict]:
+    url = f"https://api.apify.com/v2/acts/{actor_id}/run-sync-get-dataset-items"
     params = {
         "timeout": 300,
         "memory": 512,
-        "maxItems": MAX_RESULTS_PER_SEARCH,
+        "maxItems": max_items,
     }
 
     response = requests.post(
@@ -258,7 +381,7 @@ def run_actor(payload: dict) -> list[dict]:
         message = apify_error_message(response)
         raise ApifyConfigurationError(
             "Apify rejected the request. Check that APIFY_API_TOKEN is valid, "
-            f"that your account can run {ACTOR_ID}, and that billing/trial "
+            f"that your account can run {actor_id}, and that billing/trial "
             f"access is active. Apify said: {message}"
         )
 
@@ -274,13 +397,15 @@ def run_actor(payload: dict) -> list[dict]:
     return []
 
 
-def fetch_jobs_for_search(label: str, search_url: str) -> list[dict]:
+def fetch_jobs_for_search(search: dict) -> list[dict]:
     """
-    Calls the Apify LinkedIn Jobs Scraper actor synchronously
-    and returns a list of job dicts for the given LinkedIn search URL.
+    Calls the configured Apify actor synchronously
+    and returns annotated job dicts for the given search.
     """
+    label = search["display_label"]
     try:
-        return run_actor(build_actor_input(search_url))
+        jobs = run_actor(search["actor_id"], search["payload"], search["max_items"])
+        return annotate_jobs(jobs, search["source"], search["source_label"])
     except requests.exceptions.Timeout:
         print(f"  ⚠ Timeout for search '{label}' — skipping.")
         return []
@@ -307,28 +432,29 @@ def fetch_jobs_for_search(label: str, search_url: str) -> list[dict]:
 
 def make_dedup_key(job: dict) -> str:
     """
-    Primary key: jobId (if available).
+    Primary key: source + jobId (if available).
     Fallback key: title + company + location (lowercased, stripped).
     """
+    source = str(job.get("_source") or "unknown").lower().strip()
     job_id = job.get("jobId") or job.get("job_id") or job.get("id") or ""
     if job_id:
-        return str(job_id).strip()
+        return f"{source}|{str(job_id).strip()}"
 
-    title   = str(job.get("title") or job.get("jobTitle") or job.get("job_title") or "").lower().strip()
-    company = str(job.get("company") or job.get("companyName") or job.get("company_name") or "").lower().strip()
-    location= str(job.get("location") or job.get("jobLocation") or job.get("job_location") or "").lower().strip()
-    return f"{title}|{company}|{location}"
+    title = get_title(job).lower().strip()
+    company = get_company(job).lower().strip()
+    location = get_location(job).lower().strip()
+    return f"{source}|{title}|{company}|{location}"
 
 
-def merge_and_deduplicate(all_results: dict[str, list]) -> list[dict]:
+def merge_and_deduplicate(all_results: list[tuple[str, list]]) -> list[dict]:
     """
-    all_results: { keyword: [job, job, ...], ... }
+    all_results: [(keyword, [job, job, ...]), ...]
     Returns a deduplicated list of jobs, each annotated with
     'keywords_matched' = list of keywords that found it.
     """
     seen: dict[str, dict] = {}   # dedup_key → job dict
 
-    for keyword, jobs in all_results.items():
+    for keyword, jobs in all_results:
         for job in jobs:
             key = make_dedup_key(job)
             if key in seen:
@@ -355,8 +481,47 @@ def safe(job: dict, *keys) -> str:
     return "N/A"
 
 
+def nested(job: dict, *keys) -> str:
+    value = job
+    for key in keys:
+        if not isinstance(value, dict):
+            return "N/A"
+        value = value.get(key)
+    if value is None or value == "":
+        return "N/A"
+    return sheet_safe(value)
+
+
+def get_source_label(job: dict) -> str:
+    return safe(job, "_source_label")
+
+
 def get_title(job: dict) -> str:
     return safe(job, "title", "jobTitle", "job_title", "name")
+
+
+def get_company(job: dict) -> str:
+    return field(job, "companyName", "company", "organization", "jobSourceName") if "companyDetails" not in job else first_value(
+        nested(job, "companyDetails", "name"),
+        field(job, "companyName", "company", "organization", "jobSourceName"),
+    )
+
+
+def get_location(job: dict) -> str:
+    if isinstance(job.get("location"), dict):
+        return first_value(
+            nested(job, "location", "formatted", "long"),
+            nested(job, "location", "fullAddress"),
+            nested(job, "location", "city"),
+        )
+    return field(job, "location", "formattedLocation", "jobLocation", "place")
+
+
+def first_value(*values: str) -> str:
+    for value in values:
+        if value and value != "N/A":
+            return value
+    return "N/A"
 
 
 def get_job_url(job: dict) -> str:
@@ -371,22 +536,59 @@ def get_job_url(job: dict) -> str:
     )
     if url:
         return url
+
+    view_job_link = job.get("viewJobLink") or ""
+    if view_job_link:
+        if str(view_job_link).startswith("http"):
+            return str(view_job_link)
+        return f"{indeed_base_url()}{view_job_link}"
+
     job_id = job.get("jobId") or job.get("job_id") or job.get("id") or ""
     if job_id:
+        if job.get("_source") == "indeed":
+            return f"{indeed_base_url()}/viewjob?jk={job_id}"
         return f"https://www.linkedin.com/jobs/view/{job_id}/"
     return "N/A"
 
 
 def get_posted(job: dict) -> str:
-    return safe(job, "postedAt", "posted_at", "publishedAt", "published_at", "datePosted", "date_posted", "posted", "listedAt", "listed_at")
+    posted = first_value(
+        safe(job, "postedAt", "posted_at", "publishedAt", "published_at", "datePosted", "date_posted", "posted", "listedAt", "listed_at"),
+        format_timestamp(job.get("pubDate")),
+    )
+    return posted
 
 
 def get_job_type(job: dict) -> str:
-    return safe(job, "employmentType", "employment_type", "jobType", "job_type", "contractType", "contract_type", "type")
+    return field(job, "employmentType", "employment_type", "jobType", "job_type", "contractType", "contract_type", "type", "jobTypes")
 
 
 def get_experience(job: dict) -> str:
     return safe(job, "experienceLevel", "experience_level", "seniorityLevel", "seniority_level", "seniority")
+
+
+def get_apply_url(job: dict) -> str:
+    return field(job, "applyUrl", "apply_url", "originalApplyUrl", "thirdPartyApplyUrl")
+
+
+def get_company_website(job: dict) -> str:
+    return first_value(
+        field(job, "companyWebsite", "company_website", "website"),
+        nested(job, "companyDetails", "websiteUrl"),
+    )
+
+
+def format_timestamp(value) -> str:
+    if value in (None, ""):
+        return "N/A"
+    try:
+        timestamp = float(value)
+    except (TypeError, ValueError):
+        return sheet_safe(value)
+
+    if timestamp > 10_000_000_000:
+        timestamp = timestamp / 1000
+    return datetime.fromtimestamp(timestamp, SCRAPER_TZ).strftime("%Y-%m-%d")
 
 
 def has_excluded_title(job: dict) -> bool:
@@ -404,10 +606,10 @@ def filter_excluded_titles(jobs: list[dict]) -> tuple[list[dict], int]:
 # ─────────────────────────────────────────────
 
 HEADER = [
-    "Job Title", "Company", "Location", "Job Type", "Posted",
-    "Experience Level", "Applicants", "Keywords Matched", "LinkedIn URL", 
+    "App", "Job Title", "Company", "Location", "Job Type", "Posted",
+    "Experience Level", "Applicants", "Keywords Matched", "Job URL",
     "Apply URL", "Company Website",
-] 
+]
 
 MAX_CELL_CHARS = 49000
 
@@ -457,20 +659,21 @@ def hyperlink_formula(url: str, label: str) -> str:
 def make_job_rows(jobs: list[dict]) -> list[list]:
     rows = [HEADER]
     for i, job in enumerate(jobs, start=1):
-        linkedin_url = get_job_url(job)
-        apply_url = field(job, "applyUrl", "apply_url")
+        job_url = get_job_url(job)
+        apply_url = get_apply_url(job)
         rows.append([
-            field(job, "title", "jobTitle", "name"),
-            field(job, "companyName", "company", "organization"),
-            field(job, "location", "jobLocation", "place"),
+            get_source_label(job),
+            get_title(job),
+            get_company(job),
+            get_location(job),
             get_job_type(job),
             get_posted(job),
             get_experience(job),
             field(job, "applicantsCount", "applicants_count"),
             ", ".join(job.get("keywords_matched", [])),
-            hyperlink_formula(linkedin_url, "Open LinkedIn"),
+            hyperlink_formula(job_url, "Open Job"),
             hyperlink_formula(apply_url, "Open Apply"),
-            hyperlink_formula(field(job, "companyWebsite", "company_website"), "Open Company"),
+            hyperlink_formula(get_company_website(job), "Open Company"),
         ])
     return rows
 
@@ -564,7 +767,7 @@ def export_to_excel(jobs: list[dict], filename: Path) -> str:
         style_header_cell(cell)
     ws.row_dimensions[1].height = 30
 
-    url_columns = {16, 17, 18}
+    url_columns = {idx for idx, name in enumerate(HEADER, start=1) if "URL" in name}
     for row_idx in range(2, ws.max_row + 1):
         ws.row_dimensions[row_idx].height = 60
         for col_idx in range(1, ws.max_column + 1):
@@ -576,11 +779,15 @@ def export_to_excel(jobs: list[dict], filename: Path) -> str:
 
     for col_idx in range(1, ws.max_column + 1):
         ws.column_dimensions[get_column_letter(col_idx)].width = 18
+    ws.column_dimensions["A"].width = 14
     ws.column_dimensions["B"].width = 40
-    ws.column_dimensions["C"].width = 28
-    ws.column_dimensions["D"].width = 24
-    ws.column_dimensions["O"].width = 32
-    ws.column_dimensions["V"].width = 80
+    ws.column_dimensions["C"].width = 32
+    ws.column_dimensions["D"].width = 28
+    ws.column_dimensions["E"].width = 24
+    ws.column_dimensions["I"].width = 32
+    ws.column_dimensions["J"].width = 18
+    ws.column_dimensions["K"].width = 18
+    ws.column_dimensions["L"].width = 18
 
     ws.freeze_panes = "A2"
     ws.auto_filter.ref = ws.dimensions
@@ -813,9 +1020,10 @@ def main():
         print(f"   {TOKEN_ENV_VAR}={TOKEN_PLACEHOLDER}")
         return
 
-    search_source, searches = get_searches()
+    job_sources = parse_job_sources()
+    search_source, searches = get_searches(job_sources)
     if not searches:
-        print("❌ No LinkedIn searches configured.")
+        print("❌ No searches configured.")
         print("   Add keywords in the script.")
         return
 
@@ -831,32 +1039,44 @@ def main():
             return
 
     print("=" * 60)
-    print(f"  LinkedIn Job Scraper — {RUN_STARTED_AT.strftime('%Y-%m-%d %H:%M %Z')}")
+    print(f"  Job Scraper — {RUN_STARTED_AT.strftime('%Y-%m-%d %H:%M %Z')}")
     print(f"  UTC start time: {RUN_STARTED_AT_UTC.strftime('%Y-%m-%d %H:%M UTC')}")
-    print(f"  Actor: {ACTOR_ID}")
+    print(f"  Sources: {', '.join(SOURCE_DISPLAY_NAMES.get(source, source.title()) for source in job_sources)}")
+    if "linkedin" in job_sources:
+        print(f"  LinkedIn actor: {LINKEDIN_ACTOR_ID}")
+    if "indeed" in job_sources:
+        print(f"  Indeed actor: {INDEED_ACTOR_ID}")
     print(f"  Search source: {search_source}")
     print(f"  Output mode: {', '.join(sorted(output_modes))}")
     print(f"  Timezone: {SCRAPER_TIMEZONE}")
-    print(f"  Searches: {len(searches)}  |  Job types: {', '.join(CONTRACT_TYPES)}")
-    print(f"  Experience levels: {', '.join(EXPERIENCE_LEVELS)}")
-    print(f"  Max results per search: {MAX_RESULTS_PER_SEARCH}")
+    print(f"  Searches: {len(searches)}")
+    if "linkedin" in job_sources:
+        print(f"  LinkedIn job types: {', '.join(CONTRACT_TYPES)}")
+        print(f"  LinkedIn experience levels: {', '.join(EXPERIENCE_LEVELS)}")
+        print(f"  LinkedIn max results/search: {MAX_RESULTS_PER_SEARCH}")
+    if "indeed" in job_sources:
+        print(f"  Indeed country/location: {INDEED_COUNTRY.upper()} / {INDEED_LOCATION}")
+        print(f"  Indeed posted within days: {INDEED_POSTED_WITHIN_DAYS or 'any'}")
+        print(f"  Indeed max results/search: {INDEED_MAX_RESULTS_PER_SEARCH}")
     print("=" * 60)
 
-    all_results:   dict[str, list] = {}
+    all_results:   list[tuple[str, list]] = []
     zero_searches: list[str]       = []
 
-    for idx, (label, search_url) in enumerate(searches, start=1):
+    for idx, search in enumerate(searches, start=1):
+        label = search["display_label"]
+        keyword = search["keyword"]
         print(f"\n[{idx:02d}/{len(searches)}] Search: '{label}'")
-        print("  → Calling Apify actor ...", end=" ", flush=True)
+        print(f"  → Calling Apify actor {search['actor_id']} ...", end=" ", flush=True)
 
         try:
-            jobs = fetch_jobs_for_search(label, search_url)
+            jobs = fetch_jobs_for_search(search)
         except ApifyConfigurationError as e:
             print(f"\n❌ {e}")
             print("   Fix the issue above, then run the script again.")
             return
 
-        all_results[label] = jobs
+        all_results.append((keyword, jobs))
 
         if jobs:
             print(f"✓ {len(jobs)} job(s) found")
