@@ -154,15 +154,15 @@ All settings are at the top of `linkedin_job_scraper.py`:
 
 ```python
 MAX_RESULTS_PER_SEARCH = 500  # increase for more results (uses more credits)
-SEARCH_CONCURRENCY = 4  # run this many keyword searches at the same time
-APIFY_RUN_MEMORY_MB = 512  # memory for each child Apify actor run
+SEARCH_CONCURRENCY = 6  # run this many keyword searches at the same time
+APIFY_RUN_MEMORY_MB = 1024  # memory for each child Apify actor run
 APIFY_RUN_TIMEOUT_SECONDS = 300
 OUTPUT_MODE = "excel"  # choose: excel, google_sheets, both
 CONTRACT_TYPES = ["F", "P", "I"]  # full-time, part-time, internship
 EXPERIENCE_LEVELS = ["1", "2"]  # internship, entry level
 LOCATION = "Germany"
 GEO_ID = "101282230"
-SCRAPE_COMPANY_DETAILS = True
+SCRAPE_COMPANY_DETAILS = False
 USE_INCOGNITO_MODE = True
 SPLIT_BY_LOCATION = False
 SPLIT_COUNTRY = "DE"
@@ -176,7 +176,7 @@ The most useful speed settings can also be overridden from the terminal or from
 Apify environment variables:
 
 ```bash
-export JOBSCRAPER_SEARCH_CONCURRENCY=4
+export JOBSCRAPER_SEARCH_CONCURRENCY=6
 export APIFY_RUN_MEMORY_MB=1024
 export APIFY_RUN_TIMEOUT_SECONDS=300
 export JOBSCRAPER_DELAY_BETWEEN_REQUESTS=0
@@ -185,10 +185,10 @@ export JOBSCRAPER_SCRAPE_COMPANY_DETAILS=false
 
 Recommended tuning order:
 
-1. Start with `JOBSCRAPER_SEARCH_CONCURRENCY=4`.
-2. If the Apify account allows more simultaneous runs, try `6` or `8`.
-3. Increase `APIFY_RUN_MEMORY_MB` only if the child actor is memory-limited.
-4. Set `JOBSCRAPER_SCRAPE_COMPANY_DETAILS=false` if speed matters more than company metadata.
+1. Start with `JOBSCRAPER_SEARCH_CONCURRENCY=6`.
+2. If the Apify account allows more simultaneous runs, try `8`.
+3. Drop back to `4` if you see timeouts, failed actor runs, or suspiciously empty results.
+4. Increase `APIFY_RUN_MEMORY_MB` only if the child actor is memory-limited.
 
 To add/remove keywords, edit the `KEYWORDS` list.
 To change location, edit `LOCATION`.

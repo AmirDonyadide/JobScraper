@@ -48,6 +48,11 @@ jobs:
       GOOGLE_TOKEN_JSON: ${{ secrets.GOOGLE_TOKEN_JSON }}
       JOBSCRAPER_OUTPUT_MODE: ${{ github.event.inputs.output_mode || 'google_sheets' }}
       JOBSCRAPER_SOURCES: ${{ github.event.inputs.sources || 'linkedin' }}
+      JOBSCRAPER_SEARCH_CONCURRENCY: "6"
+      APIFY_RUN_MEMORY_MB: "1024"
+      APIFY_RUN_TIMEOUT_SECONDS: "300"
+      JOBSCRAPER_DELAY_BETWEEN_REQUESTS: "0"
+      JOBSCRAPER_SCRAPE_COMPANY_DETAILS: "false"
       JOBSCRAPER_TIMEZONE: Europe/Rome
       PYTHONUNBUFFERED: "1"
       TZ: Europe/Rome
