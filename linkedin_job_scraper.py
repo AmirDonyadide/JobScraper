@@ -136,7 +136,7 @@ MAX_RESULTS_PER_SEARCH = load_int_setting("JOBSCRAPER_MAX_RESULTS_PER_SEARCH", 5
 INDEED_MAX_RESULTS_PER_SEARCH = load_int_setting("INDEED_MAX_RESULTS_PER_SEARCH", MAX_RESULTS_PER_SEARCH)
 
 # Run multiple keyword searches at the same time. This is the main speed knob.
-SEARCH_CONCURRENCY = max(1, load_int_setting("JOBSCRAPER_SEARCH_CONCURRENCY", 14))
+SEARCH_CONCURRENCY = max(1, load_int_setting("JOBSCRAPER_SEARCH_CONCURRENCY", 15))
 
 # Apify settings for the child actor runs started by this script.
 APIFY_RUN_MEMORY_MB = max(128, load_int_setting("APIFY_RUN_MEMORY_MB", 512))
@@ -682,24 +682,8 @@ def get_job_type(job: dict) -> str:
     return field(job, "employmentType", "employment_type", "jobType", "job_type", "contractType", "contract_type", "type", "jobTypes")
 
 
-def get_job_type_choice(job: dict) -> str:
-    job_type = get_job_type(job).casefold()
-    if "part" in job_type:
-        return "part-time"
-    if "full" in job_type:
-        return "full-time"
-    return ""
-
-
 def get_experience(job: dict) -> str:
     return safe(job, "experienceLevel", "experience_level", "seniorityLevel", "seniority_level", "seniority")
-
-
-def get_experience_choice(job: dict) -> str:
-    experience = get_experience(job).casefold()
-    if "entry" in experience:
-        return "entry level"
-    return "not applicable"
 
 
 def get_apply_url(job: dict) -> str:
@@ -783,8 +767,6 @@ HEADER = [
 ]
 
 APPLICATION_STATUS_OPTIONS = ["applied", "rejected", "interview", "accepted"]
-JOB_TYPE_OPTIONS = ["part-time", "full-time"]
-EXPERIENCE_LEVEL_OPTIONS = ["entry level", "not applicable"]
 
 MAX_CELL_CHARS = 49000
 
@@ -842,9 +824,9 @@ def make_job_rows(jobs: list[dict]) -> list[list]:
             get_title(job),
             get_company(job),
             get_location(job),
-            get_job_type_choice(job),
+            get_job_type(job),
             get_posted(job),
-            get_experience_choice(job),
+            get_experience(job),
             field(job, "applicantsCount", "applicants_count"),
             ", ".join(job.get("keywords_matched", [])),
             hyperlink_formula(job_url, "Open Job"),
@@ -1134,18 +1116,6 @@ def format_spreadsheet(service, spreadsheet_id: str, sheet_id: int, job_row_coun
             sheet_id,
             "Application Status",
             APPLICATION_STATUS_OPTIONS,
-            editable_row_count,
-        ),
-        dropdown_validation_request(
-            sheet_id,
-            "Job Type",
-            JOB_TYPE_OPTIONS,
-            editable_row_count,
-        ),
-        dropdown_validation_request(
-            sheet_id,
-            "Experience Level",
-            EXPERIENCE_LEVEL_OPTIONS,
             editable_row_count,
         ),
         date_time_format_request(sheet_id, "Posted", editable_row_count),

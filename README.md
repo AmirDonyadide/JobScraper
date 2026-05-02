@@ -118,9 +118,9 @@ Add this line (runs at 8am daily):
 | Job Title | Position name |
 | Company | Employer name |
 | Location | City / region |
-| Job Type | Google Sheets dropdown: part-time or full-time |
+| Job Type | Text from the job source |
 | Posted | Europe/Berlin date and time, formatted as a date-time column in Google Sheets |
-| Experience Level | Google Sheets dropdown: entry level or not applicable |
+| Experience Level | Text from the job source |
 | Applicants | Applicant count if visible |
 | Keywords Matched | All keywords that returned this job |
 | Job URL | Clickable link to the job posting |
@@ -144,7 +144,7 @@ All settings are at the top of `linkedin_job_scraper.py`:
 
 ```python
 MAX_RESULTS_PER_SEARCH = 500  # increase for more results (uses more credits)
-SEARCH_CONCURRENCY = 14  # run this many keyword searches at the same time
+SEARCH_CONCURRENCY = 15  # run this many keyword searches at the same time
 APIFY_RUN_MEMORY_MB = 512  # memory for each child Apify actor run
 APIFY_RUN_TIMEOUT_SECONDS = 300
 OUTPUT_MODE = "excel"  # choose: excel, google_sheets, both
@@ -167,7 +167,7 @@ The most useful speed settings can also be overridden from the terminal or from
 Apify environment variables:
 
 ```bash
-export JOBSCRAPER_SEARCH_CONCURRENCY=14
+export JOBSCRAPER_SEARCH_CONCURRENCY=15
 export APIFY_RUN_MEMORY_MB=512
 export APIFY_RUN_TIMEOUT_SECONDS=300
 export JOBSCRAPER_DELAY_BETWEEN_REQUESTS=0
@@ -177,9 +177,9 @@ export JOBSCRAPER_POSTED_TIMEZONE=Europe/Berlin
 
 Recommended tuning order:
 
-1. Start with `JOBSCRAPER_SEARCH_CONCURRENCY=14`.
-2. Drop back to `8`, `6`, or `4` if you see timeouts, failed actor runs, or suspiciously empty results.
-3. Keep `APIFY_RUN_MEMORY_MB=512` with an 8 GB Apify limit; `14 × 512 MB = 7168 MB`.
+1. Start with `JOBSCRAPER_SEARCH_CONCURRENCY=15`.
+2. Drop back to `14`, `8`, `6`, or `4` if you see timeouts, failed actor runs, or suspiciously empty results.
+3. Keep `APIFY_RUN_MEMORY_MB=512` with an 8 GB Apify limit; `15 × 512 MB = 7680 MB`.
 
 To add/remove keywords, edit the `KEYWORDS` list.
 To change location, edit `LOCATION`.
