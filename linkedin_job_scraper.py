@@ -136,7 +136,7 @@ MAX_RESULTS_PER_SEARCH = load_int_setting("JOBSCRAPER_MAX_RESULTS_PER_SEARCH", 5
 INDEED_MAX_RESULTS_PER_SEARCH = load_int_setting("INDEED_MAX_RESULTS_PER_SEARCH", MAX_RESULTS_PER_SEARCH)
 
 # Run multiple keyword searches at the same time. This is the main speed knob.
-SEARCH_CONCURRENCY = max(1, load_int_setting("JOBSCRAPER_SEARCH_CONCURRENCY", 6))
+SEARCH_CONCURRENCY = max(1, load_int_setting("JOBSCRAPER_SEARCH_CONCURRENCY", 14))
 
 # Apify settings for the child actor runs started by this script.
 APIFY_RUN_MEMORY_MB = max(128, load_int_setting("APIFY_RUN_MEMORY_MB", 1024))
@@ -1256,11 +1256,25 @@ def parse_output_mode() -> set[str]:
     return {"excel"}
 
 
+def format_duration(seconds: float) -> str:
+    total_seconds = int(round(seconds))
+    hours, remainder = divmod(total_seconds, 3600)
+    minutes, seconds = divmod(remainder, 60)
+
+    if hours:
+        return f"{hours}h {minutes}m {seconds}s"
+    if minutes:
+        return f"{minutes}m {seconds}s"
+    return f"{seconds}s"
+
+
 # ─────────────────────────────────────────────
 #  MAIN
 # ─────────────────────────────────────────────
 
 def main():
+    run_started = time.perf_counter()
+
     if not APIFY_API_TOKEN or APIFY_API_TOKEN == TOKEN_PLACEHOLDER:
         print(f"❌ Please set {TOKEN_ENV_VAR} in {TOKEN_FILE.name} or as an environment variable.")
         print(f"   Add this line to {TOKEN_FILE.name}:")
@@ -1359,6 +1373,7 @@ def main():
     # ── Summary ──────────────────────────────────
     print("\n" + "=" * 60)
     print(f"  Searched {len(searches)} search URL(s) → Found {len(unique_jobs)} unique job postings.")
+    print(f"  Total runtime: {format_duration(time.perf_counter() - run_started)}")
     if excluded_title_count:
         print(f"  Excluded by title rule: {excluded_title_count}")
     if zero_searches:
