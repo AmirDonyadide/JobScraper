@@ -682,10 +682,6 @@ def get_job_type(job: dict) -> str:
     return field(job, "employmentType", "employment_type", "jobType", "job_type", "contractType", "contract_type", "type", "jobTypes")
 
 
-def get_experience(job: dict) -> str:
-    return safe(job, "experienceLevel", "experience_level", "seniorityLevel", "seniority_level", "seniority")
-
-
 def get_apply_url(job: dict) -> str:
     return field(job, "applyUrl", "apply_url", "originalApplyUrl", "thirdPartyApplyUrl", "externalApplyLink")
 
@@ -762,7 +758,7 @@ def filter_excluded_titles(jobs: list[dict]) -> tuple[list[dict], int]:
 
 HEADER = [
     "Application Status", "App", "Job Title", "Company", "Location",
-    "Job Type", "Posted", "Experience Level", "Applicants",
+    "Job Type", "Posted", "Applicants",
     "Keywords Matched", "Job URL", "Apply URL",
 ]
 
@@ -826,7 +822,6 @@ def make_job_rows(jobs: list[dict]) -> list[list]:
             get_location(job),
             get_job_type(job),
             get_posted(job),
-            get_experience(job),
             field(job, "applicantsCount", "applicants_count"),
             ", ".join(job.get("keywords_matched", [])),
             hyperlink_formula(job_url, "Open Job"),
@@ -942,7 +937,6 @@ def export_to_excel(jobs: list[dict], filename: Path) -> str:
         "Location": 28,
         "Job Type": 18,
         "Posted": 22,
-        "Experience Level": 22,
         "Keywords Matched": 32,
         "Job URL": 18,
         "Apply URL": 18,

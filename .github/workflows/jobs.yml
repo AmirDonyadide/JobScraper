@@ -170,6 +170,9 @@ jobs:
           echo "Output mode: ${JOBSCRAPER_OUTPUT_MODE}"
           echo "Job sources: ${JOBSCRAPER_SOURCES}"
           echo "Scraper timezone: ${JOBSCRAPER_TIMEZONE}"
+          echo "Posted timezone: ${JOBSCRAPER_POSTED_TIMEZONE}"
+          echo "Search concurrency: ${JOBSCRAPER_SEARCH_CONCURRENCY}"
+          echo "Apify child run memory: ${APIFY_RUN_MEMORY_MB} MB"
 
           python - <<'PY'
           from datetime import datetime, timezone

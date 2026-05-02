@@ -120,7 +120,6 @@ Add this line (runs at 8am daily):
 | Location | City / region |
 | Job Type | Text from the job source |
 | Posted | Europe/Berlin date and time, formatted as a date-time column in Google Sheets |
-| Experience Level | Text from the job source |
 | Applicants | Applicant count if visible |
 | Keywords Matched | All keywords that returned this job |
 | Job URL | Clickable link to the job posting |
