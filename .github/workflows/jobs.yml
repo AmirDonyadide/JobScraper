@@ -3,10 +3,10 @@ name: LinkedIn Job Scraper
 on:
   workflow_dispatch:
   schedule:
-    # GitHub schedules use UTC. These two entries cover Europe/Rome DST changes.
-    # A guard step below runs the scraper only when Europe/Rome local time is 10:00.
+    # GitHub cron is UTC. These two entries cover Europe/Rome DST changes:
+    # - 08:00 UTC = 10:00 Europe/Rome during CEST
+    # The guard step below allows only the run where Europe/Rome local hour is 10.
     - cron: "0 8 * * *"
-    - cron: "0 9 * * *"
 
 permissions:
   contents: read
