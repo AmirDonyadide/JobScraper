@@ -19,13 +19,14 @@ Usage:
 import json
 import os
 import time
-import requests
-import openpyxl
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlencode
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+import openpyxl
+import requests
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
@@ -61,7 +62,7 @@ def load_local_env() -> dict[str, str]:
         if not line or line.startswith("#"):
             continue
         if line.startswith("export "):
-            line = line[len("export "):].strip()
+            line = line[len("export ") :].strip()
         if "=" not in line:
             continue
 
@@ -97,12 +98,7 @@ def load_bool_setting(name: str, default: bool) -> bool:
     return default
 
 
-def load_apify_token() -> str:
-    """Load the Apify token from the environment first, then from local .env."""
-    return load_setting(TOKEN_ENV_VAR)
-
-
-APIFY_API_TOKEN = load_apify_token()
+APIFY_API_TOKEN = load_setting(TOKEN_ENV_VAR)
 GOOGLE_SPREADSHEET_ID = load_setting("GOOGLE_SPREADSHEET_ID")
 SCRAPER_TIMEZONE = load_setting("JOBSCRAPER_TIMEZONE", "Europe/Rome")
 POSTED_TIMEZONE = load_setting("JOBSCRAPER_POSTED_TIMEZONE", "Europe/Berlin")
@@ -133,7 +129,9 @@ INDEED_ACTOR_ID = "misceres~indeed-scraper"
 
 # Max jobs to fetch per search URL (increase if you want more, costs more credits)
 MAX_RESULTS_PER_SEARCH = load_int_setting("JOBSCRAPER_MAX_RESULTS_PER_SEARCH", 500)
-INDEED_MAX_RESULTS_PER_SEARCH = load_int_setting("INDEED_MAX_RESULTS_PER_SEARCH", MAX_RESULTS_PER_SEARCH)
+INDEED_MAX_RESULTS_PER_SEARCH = load_int_setting(
+    "INDEED_MAX_RESULTS_PER_SEARCH", MAX_RESULTS_PER_SEARCH
+)
 
 # Run multiple keyword searches at the same time. This is the main speed knob.
 SEARCH_CONCURRENCY = max(1, load_int_setting("JOBSCRAPER_SEARCH_CONCURRENCY", 15))
@@ -147,17 +145,46 @@ APIFY_CLIENT_TIMEOUT_SECONDS = max(
 )
 
 # Optional seconds to wait before starting another keyword request.
-DELAY_BETWEEN_REQUESTS = max(0, load_int_setting("JOBSCRAPER_DELAY_BETWEEN_REQUESTS", 0))
+DELAY_BETWEEN_REQUESTS = max(
+    0, load_int_setting("JOBSCRAPER_DELAY_BETWEEN_REQUESTS", 0)
+)
 
 # Choose: "linkedin", "indeed", or "both"
 SOURCE_MODE = load_setting("JOBSCRAPER_SOURCES", "linkedin").lower()
+SOURCE_ORDER = ("linkedin", "indeed")
 SOURCE_DISPLAY_NAMES = {
     "linkedin": "LinkedIn",
     "indeed": "Indeed",
 }
+SOURCE_ALIASES = {
+    "linkedin": {"linkedin"},
+    "li": {"linkedin"},
+    "indeed": {"indeed"},
+    "both": {"linkedin", "indeed"},
+    "all": {"linkedin", "indeed"},
+}
+SOURCE_ACTOR_IDS = {
+    "linkedin": LINKEDIN_ACTOR_ID,
+    "indeed": INDEED_ACTOR_ID,
+}
+SOURCE_MAX_ITEMS = {
+    "linkedin": MAX_RESULTS_PER_SEARCH,
+    "indeed": INDEED_MAX_RESULTS_PER_SEARCH,
+}
 
 # Choose: "excel", "google_sheets", or "both"
 OUTPUT_MODE = load_setting("JOBSCRAPER_OUTPUT_MODE", "excel").lower()
+OUTPUT_MODE_ALIASES = {
+    "excel": {"excel"},
+    "local": {"excel"},
+    "xlsx": {"excel"},
+    "google": {"google_sheets"},
+    "drive": {"google_sheets"},
+    "google_sheets": {"google_sheets"},
+    "sheets": {"google_sheets"},
+    "both": {"excel", "google_sheets"},
+    "all": {"excel", "google_sheets"},
+}
 
 # Local Excel output path
 EXCEL_OUTPUT_FILE = Path(__file__).with_name("jobs.xlsx")
@@ -181,7 +208,7 @@ SCRAPE_COMPANY_DETAILS = load_bool_setting("JOBSCRAPER_SCRAPE_COMPANY_DETAILS", 
 USE_INCOGNITO_MODE = load_bool_setting("JOBSCRAPER_USE_INCOGNITO_MODE", True)
 SPLIT_BY_LOCATION = load_bool_setting("JOBSCRAPER_SPLIT_BY_LOCATION", False)
 SPLIT_COUNTRY = "DE"
-EXCLUDED_TITLE_TERMS = ["Werkstudent"]
+EXCLUDED_TITLE_TERMS = ["Werkstudent", "Working Student", "Senior"]
 
 INDEED_COUNTRY = load_setting("INDEED_COUNTRY", "DE").upper()
 INDEED_LOCATION = load_setting("INDEED_LOCATION", LOCATION)
@@ -235,6 +262,7 @@ KEYWORDS = [
 # ─────────────────────────────────────────────
 #  APIFY API CALL
 # ─────────────────────────────────────────────
+
 
 class ApifyConfigurationError(RuntimeError):
     """Raised when Apify rejects the token, actor access, or paid actor setup."""
@@ -320,61 +348,53 @@ def build_indeed_actor_input(keyword: str) -> dict:
     }
 
 
-def parse_job_sources() -> list[str]:
-    aliases = {
-        "linkedin": {"linkedin"},
-        "li": {"linkedin"},
-        "indeed": {"indeed"},
-        "both": {"linkedin", "indeed"},
-        "all": {"linkedin", "indeed"},
+def build_actor_input(source: str, keyword: str) -> dict:
+    if source == "linkedin":
+        return build_linkedin_actor_input(build_linkedin_search_url(keyword))
+    if source == "indeed":
+        return build_indeed_actor_input(keyword)
+    raise ValueError(f"Unknown job source: {source}")
+
+
+def source_label(source: str) -> str:
+    return SOURCE_DISPLAY_NAMES.get(source, source.title())
+
+
+def build_search(source: str, keyword: str) -> dict:
+    label = source_label(source)
+    return {
+        "source": source,
+        "source_label": label,
+        "keyword": keyword,
+        "display_label": f"{label} / {keyword}",
+        "actor_id": SOURCE_ACTOR_IDS[source],
+        "payload": build_actor_input(source, keyword),
+        "max_items": SOURCE_MAX_ITEMS[source],
     }
-    selected = aliases.get(SOURCE_MODE)
+
+
+def parse_job_sources() -> list[str]:
+    selected = SOURCE_ALIASES.get(SOURCE_MODE)
     if not selected:
         print(f"⚠ Unknown JOBSCRAPER_SOURCES '{SOURCE_MODE}', using LinkedIn only.")
         selected = {"linkedin"}
 
-    return [source for source in ("linkedin", "indeed") if source in selected]
+    return [source for source in SOURCE_ORDER if source in selected]
 
 
 def get_searches(sources: list[str]) -> tuple[str, list[dict]]:
-    searches = []
-
-    if "linkedin" in sources:
-        for keyword in KEYWORDS:
-            searches.append({
-                "source": "linkedin",
-                "source_label": "LinkedIn",
-                "keyword": keyword,
-                "display_label": f"LinkedIn / {keyword}",
-                "actor_id": LINKEDIN_ACTOR_ID,
-                "payload": build_linkedin_actor_input(build_linkedin_search_url(keyword)),
-                "max_items": MAX_RESULTS_PER_SEARCH,
-            })
-
-    if "indeed" in sources:
-        for keyword in KEYWORDS:
-            searches.append({
-                "source": "indeed",
-                "source_label": "Indeed",
-                "keyword": keyword,
-                "display_label": f"Indeed / {keyword}",
-                "actor_id": INDEED_ACTOR_ID,
-                "payload": build_indeed_actor_input(keyword),
-                "max_items": INDEED_MAX_RESULTS_PER_SEARCH,
-            })
-
-    source_labels = ", ".join(SOURCE_DISPLAY_NAMES.get(source, source.title()) for source in sources)
+    searches = [
+        build_search(source, keyword)
+        for source in sources
+        if source in SOURCE_ACTOR_IDS
+        for keyword in KEYWORDS
+    ]
+    source_labels = ", ".join(source_label(source) for source in sources)
     return f"generated {source_labels} keyword URLs", searches
 
 
 def annotate_jobs(jobs: list[dict], source: str, source_label: str) -> list[dict]:
-    annotated = []
-    for job in jobs:
-        job_copy = dict(job)
-        job_copy["_source"] = source
-        job_copy["_source_label"] = source_label
-        annotated.append(job_copy)
-    return annotated
+    return [dict(job, _source=source, _source_label=source_label) for job in jobs]
 
 
 def run_actor(actor_id: str, payload: dict, max_items: int) -> list[dict]:
@@ -442,7 +462,9 @@ def fetch_jobs_for_search(search: dict) -> list[dict]:
         return []
 
 
-def run_all_searches(searches: list[dict]) -> tuple[list[tuple[str, list]], list[str], dict[str, str], list[str]]:
+def run_all_searches(
+    searches: list[dict],
+) -> tuple[list[tuple[str, list]], list[str], dict[str, str], list[str]]:
     """
     Run keyword searches concurrently while preserving the original result order.
 
@@ -533,6 +555,7 @@ def run_all_searches(searches: list[dict]) -> tuple[list[tuple[str, list]], list
 #  DEDUPLICATION
 # ─────────────────────────────────────────────
 
+
 def make_dedup_key(job: dict) -> str:
     """
     Primary key: source + jobId (if available).
@@ -555,7 +578,7 @@ def merge_and_deduplicate(all_results: list[tuple[str, list]]) -> list[dict]:
     Returns a deduplicated list of jobs, each annotated with
     'keywords_matched' = list of keywords that found it.
     """
-    seen: dict[str, dict] = {}   # dedup_key → job dict
+    seen: dict[str, dict] = {}  # dedup_key → job dict
 
     for keyword, jobs in all_results:
         for job in jobs:
@@ -574,6 +597,7 @@ def merge_and_deduplicate(all_results: list[tuple[str, list]]) -> list[dict]:
 # ─────────────────────────────────────────────
 #  FIELD EXTRACTION HELPERS
 # ─────────────────────────────────────────────
+
 
 def safe(job: dict, *keys) -> str:
     """Try multiple key names and return first non-empty value."""
@@ -604,9 +628,12 @@ def get_title(job: dict) -> str:
 
 
 def get_company(job: dict) -> str:
-    return field(job, "companyName", "company", "organization", "jobSourceName") if "companyDetails" not in job else first_value(
+    company = field(job, "companyName", "company", "organization", "jobSourceName")
+    if "companyDetails" not in job:
+        return company
+    return first_value(
         nested(job, "companyDetails", "name"),
-        field(job, "companyName", "company", "organization", "jobSourceName"),
+        company,
     )
 
 
@@ -656,8 +683,15 @@ def get_job_url(job: dict) -> str:
 
 def get_posted(job: dict) -> str:
     posted_keys = (
-        "postedAt", "posted_at", "publishedAt", "published_at",
-        "datePosted", "date_posted", "posted", "listedAt", "listed_at",
+        "postedAt",
+        "posted_at",
+        "publishedAt",
+        "published_at",
+        "datePosted",
+        "date_posted",
+        "posted",
+        "listedAt",
+        "listed_at",
     )
     fallback = ""
     for key in posted_keys:
@@ -679,25 +713,28 @@ def get_posted(job: dict) -> str:
 
 
 def get_job_type(job: dict) -> str:
-    return field(job, "employmentType", "employment_type", "jobType", "job_type", "contractType", "contract_type", "type", "jobTypes")
-
-
-def get_apply_url(job: dict) -> str:
-    return field(job, "applyUrl", "apply_url", "originalApplyUrl", "thirdPartyApplyUrl", "externalApplyLink")
-
-
-def get_company_website(job: dict) -> str:
-    return first_value(
-        field(job, "companyWebsite", "company_website", "website"),
-        nested(job, "companyDetails", "websiteUrl"),
+    return field(
+        job,
+        "employmentType",
+        "employment_type",
+        "jobType",
+        "job_type",
+        "contractType",
+        "contract_type",
+        "type",
+        "jobTypes",
     )
 
 
-def format_timestamp(value) -> str:
-    posted_at = parse_datetime_value(value)
-    if posted_at:
-        return format_posted_datetime(posted_at)
-    return "N/A"
+def get_apply_url(job: dict) -> str:
+    return field(
+        job,
+        "applyUrl",
+        "apply_url",
+        "originalApplyUrl",
+        "thirdPartyApplyUrl",
+        "externalApplyLink",
+    )
 
 
 def parse_datetime_value(value):
@@ -753,13 +790,21 @@ def filter_excluded_titles(jobs: list[dict]) -> tuple[list[dict], int]:
 
 
 # ─────────────────────────────────────────────
-#  GOOGLE SHEETS EXPORT
+#  EXPORT ROW HELPERS
 # ─────────────────────────────────────────────
 
 HEADER = [
-    "Application Status", "App", "Job Title", "Company", "Location",
-    "Job Type", "Posted", "Applicants",
-    "Keywords Matched", "Job URL", "Apply URL",
+    "Application Status",
+    "App",
+    "Job Title",
+    "Company",
+    "Location",
+    "Job Type",
+    "Posted",
+    "Applicants",
+    "Keywords Matched",
+    "Job URL",
+    "Apply URL",
 ]
 
 APPLICATION_STATUS_OPTIONS = ["applied", "rejected", "interview", "accepted"]
@@ -775,7 +820,9 @@ def sheet_safe(value) -> str:
     if value is None or value == "":
         return "N/A"
     if isinstance(value, list):
-        text = ", ".join(str(item) for item in value if item is not None and str(item).strip())
+        text = ", ".join(
+            str(item) for item in value if item is not None and str(item).strip()
+        )
     elif isinstance(value, dict):
         text = json.dumps(value, ensure_ascii=False)
     else:
@@ -785,7 +832,7 @@ def sheet_safe(value) -> str:
     if not text:
         return "N/A"
     if len(text) > MAX_CELL_CHARS:
-        return text[:MAX_CELL_CHARS - 20] + " ... [truncated]"
+        return text[: MAX_CELL_CHARS - 20] + " ... [truncated]"
     if text[0] in "=+-@":
         return "'" + text
     return text
@@ -811,26 +858,30 @@ def hyperlink_formula(url: str, label: str) -> str:
 
 def make_job_rows(jobs: list[dict]) -> list[list]:
     rows = [HEADER]
-    for i, job in enumerate(jobs, start=1):
+    for job in jobs:
         job_url = get_job_url(job)
         apply_url = get_apply_url(job)
-        rows.append([
-            "",
-            get_source_label(job),
-            get_title(job),
-            get_company(job),
-            get_location(job),
-            get_job_type(job),
-            get_posted(job),
-            field(job, "applicantsCount", "applicants_count"),
-            ", ".join(job.get("keywords_matched", [])),
-            hyperlink_formula(job_url, "Open Job"),
-            hyperlink_formula(apply_url, "Open Apply"),
-        ])
+        rows.append(
+            [
+                "",
+                get_source_label(job),
+                get_title(job),
+                get_company(job),
+                get_location(job),
+                get_job_type(job),
+                get_posted(job),
+                field(job, "applicantsCount", "applicants_count"),
+                ", ".join(job.get("keywords_matched", [])),
+                hyperlink_formula(job_url, "Open Job"),
+                hyperlink_formula(apply_url, "Open Apply"),
+            ]
+        )
     return rows
 
 
-def unique_name(existing_names: set[str], base_name: str, max_length: int | None = None) -> str:
+def unique_name(
+    existing_names: set[str], base_name: str, max_length: int | None = None
+) -> str:
     name = base_name[:max_length] if max_length else base_name
     if name not in existing_names:
         return name
@@ -839,7 +890,7 @@ def unique_name(existing_names: set[str], base_name: str, max_length: int | None
     while True:
         suffix = f" ({counter})"
         if max_length:
-            candidate = f"{base_name[:max_length - len(suffix)]}{suffix}"
+            candidate = f"{base_name[: max_length - len(suffix)]}{suffix}"
         else:
             candidate = f"{base_name}{suffix}"
         if candidate not in existing_names:
@@ -874,7 +925,9 @@ def style_data_cell(cell, row_idx: int, is_url: bool = False):
     cell.alignment = Alignment(vertical="top", wrap_text=True)
     cell.border = BORDER
     if is_url:
-        cell.font = Font(color=COLOR_ACCENT, name="Calibri", size=10, underline="single")
+        cell.font = Font(
+            color=COLOR_ACCENT, name="Calibri", size=10, underline="single"
+        )
     else:
         cell.font = Font(name="Calibri", size=10)
 
@@ -883,10 +936,14 @@ def parse_hyperlink_formula(value: str):
     prefix = '=HYPERLINK("'
     separator = '", "'
     suffix = '")'
-    if not isinstance(value, str) or not value.startswith(prefix) or not value.endswith(suffix):
+    if (
+        not isinstance(value, str)
+        or not value.startswith(prefix)
+        or not value.endswith(suffix)
+    ):
         return None
 
-    body = value[len(prefix):-len(suffix)]
+    body = value[len(prefix) : -len(suffix)]
     if separator not in body:
         return None
 
@@ -942,7 +999,9 @@ def export_to_excel(jobs: list[dict], filename: Path) -> str:
         "Apply URL": 18,
     }
     for col_idx, header in enumerate(HEADER, start=1):
-        ws.column_dimensions[get_column_letter(col_idx)].width = width_by_header.get(header, 18)
+        ws.column_dimensions[get_column_letter(col_idx)].width = width_by_header.get(
+            header, 18
+        )
 
     ws.freeze_panes = "A2"
     ws.auto_filter.ref = ws.dimensions
@@ -954,6 +1013,7 @@ def export_to_excel(jobs: list[dict], filename: Path) -> str:
 # ─────────────────────────────────────────────
 #  GOOGLE SHEETS EXPORT
 # ─────────────────────────────────────────────
+
 
 def build_google_sheets_service():
     try:
@@ -969,7 +1029,9 @@ def build_google_sheets_service():
 
     creds = None
     if GOOGLE_TOKEN_FILE.exists():
-        creds = Credentials.from_authorized_user_file(str(GOOGLE_TOKEN_FILE), GOOGLE_SCOPES)
+        creds = Credentials.from_authorized_user_file(
+            str(GOOGLE_TOKEN_FILE), GOOGLE_SCOPES
+        )
         if not creds.has_scopes(GOOGLE_SCOPES):
             creds = None
 
@@ -982,7 +1044,9 @@ def build_google_sheets_service():
                     f"Missing {GOOGLE_CLIENT_SECRET_FILE.name}. Create a Google OAuth "
                     "Desktop client, download its JSON credentials, and save it in this folder."
                 )
-            flow = InstalledAppFlow.from_client_secrets_file(str(GOOGLE_CLIENT_SECRET_FILE), GOOGLE_SCOPES)
+            flow = InstalledAppFlow.from_client_secrets_file(
+                str(GOOGLE_CLIENT_SECRET_FILE), GOOGLE_SCOPES
+            )
             creds = flow.run_local_server(port=0)
 
         GOOGLE_TOKEN_FILE.write_text(creds.to_json(), encoding="utf-8")
@@ -1018,7 +1082,9 @@ def column_range(sheet_id: int, column_name: str, end_row_index: int) -> dict:
     }
 
 
-def dropdown_validation_request(sheet_id: int, column_name: str, options: list[str], end_row_index: int) -> dict:
+def dropdown_validation_request(
+    sheet_id: int, column_name: str, options: list[str], end_row_index: int
+) -> dict:
     return {
         "setDataValidation": {
             "range": column_range(sheet_id, column_name, end_row_index),
@@ -1034,7 +1100,9 @@ def dropdown_validation_request(sheet_id: int, column_name: str, options: list[s
     }
 
 
-def date_time_format_request(sheet_id: int, column_name: str, end_row_index: int) -> dict:
+def date_time_format_request(
+    sheet_id: int, column_name: str, end_row_index: int
+) -> dict:
     return {
         "repeatCell": {
             "range": column_range(sheet_id, column_name, end_row_index),
@@ -1072,7 +1140,11 @@ def format_spreadsheet(service, spreadsheet_id: str, sheet_id: int, job_row_coun
                 },
                 "cell": {
                     "userEnteredFormat": {
-                        "backgroundColor": {"red": 0.063, "green": 0.173, "blue": 0.325},
+                        "backgroundColor": {
+                            "red": 0.063,
+                            "green": 0.173,
+                            "blue": 0.325,
+                        },
                         "horizontalAlignment": "CENTER",
                         "textFormat": {
                             "bold": True,
@@ -1130,39 +1202,55 @@ def read_google_spreadsheet_id() -> str:
 
 
 def get_google_spreadsheet(service, spreadsheet_id: str) -> dict:
-    return service.spreadsheets().get(
-        spreadsheetId=spreadsheet_id,
-        fields="spreadsheetId,spreadsheetUrl,sheets(properties(sheetId,title))",
-    ).execute()
+    return (
+        service.spreadsheets()
+        .get(
+            spreadsheetId=spreadsheet_id,
+            fields="spreadsheetId,spreadsheetUrl,sheets(properties(sheetId,title))",
+        )
+        .execute()
+    )
 
 
 def create_google_spreadsheet(service) -> tuple[dict, str, int]:
-    spreadsheet = service.spreadsheets().create(
-        body={
-            "properties": {"title": SPREADSHEET_TITLE},
-            "sheets": [{"properties": {"title": RUN_SHEET_NAME}}],
-        },
-        fields="spreadsheetId,spreadsheetUrl,sheets(properties(sheetId,title))",
-    ).execute()
-    GOOGLE_SPREADSHEET_ID_FILE.write_text(spreadsheet["spreadsheetId"], encoding="utf-8")
+    spreadsheet = (
+        service.spreadsheets()
+        .create(
+            body={
+                "properties": {"title": SPREADSHEET_TITLE},
+                "sheets": [{"properties": {"title": RUN_SHEET_NAME}}],
+            },
+            fields="spreadsheetId,spreadsheetUrl,sheets(properties(sheetId,title))",
+        )
+        .execute()
+    )
+    GOOGLE_SPREADSHEET_ID_FILE.write_text(
+        spreadsheet["spreadsheetId"], encoding="utf-8"
+    )
     sheet_id = spreadsheet["sheets"][0]["properties"]["sheetId"]
     return spreadsheet, RUN_SHEET_NAME, sheet_id
 
 
-def add_google_run_sheet(service, spreadsheet_id: str, existing_names: set[str]) -> tuple[str, int]:
+def add_google_run_sheet(
+    service, spreadsheet_id: str, existing_names: set[str]
+) -> tuple[str, int]:
     sheet_name = unique_name(existing_names, RUN_SHEET_NAME)
-    response = service.spreadsheets().batchUpdate(
-        spreadsheetId=spreadsheet_id,
-        body={
-            "requests": [
-                {
-                    "addSheet": {
-                        "properties": {"title": sheet_name},
+    response = (
+        service.spreadsheets()
+        .batchUpdate(
+            spreadsheetId=spreadsheet_id,
+            body={
+                "requests": [
+                    {
+                        "addSheet": {
+                            "properties": {"title": sheet_name},
+                        }
                     }
-                }
-            ]
-        },
-    ).execute()
+                ]
+            },
+        )
+        .execute()
+    )
     sheet_id = response["replies"][0]["addSheet"]["properties"]["sheetId"]
     return sheet_name, sheet_id
 
@@ -1171,7 +1259,12 @@ def get_or_create_google_run_sheet(service) -> tuple[str, str, str, int]:
     spreadsheet_id = read_google_spreadsheet_id()
     if not spreadsheet_id:
         spreadsheet, sheet_name, sheet_id = create_google_spreadsheet(service)
-        return spreadsheet["spreadsheetId"], spreadsheet["spreadsheetUrl"], sheet_name, sheet_id
+        return (
+            spreadsheet["spreadsheetId"],
+            spreadsheet["spreadsheetUrl"],
+            sheet_name,
+            sheet_id,
+        )
 
     try:
         spreadsheet = get_google_spreadsheet(service, spreadsheet_id)
@@ -1183,15 +1276,16 @@ def get_or_create_google_run_sheet(service) -> tuple[str, str, str, int]:
         ) from e
 
     existing_names = {
-        sheet["properties"]["title"]
-        for sheet in spreadsheet.get("sheets", [])
+        sheet["properties"]["title"] for sheet in spreadsheet.get("sheets", [])
     }
     sheet_name, sheet_id = add_google_run_sheet(service, spreadsheet_id, existing_names)
     return spreadsheet_id, spreadsheet["spreadsheetUrl"], sheet_name, sheet_id
 
 
 def export_to_google_sheets(service, jobs: list[dict]) -> str:
-    spreadsheet_id, spreadsheet_url, sheet_name, sheet_id = get_or_create_google_run_sheet(service)
+    spreadsheet_id, spreadsheet_url, sheet_name, sheet_id = (
+        get_or_create_google_run_sheet(service)
+    )
     job_rows = make_job_rows(jobs)
 
     update_values(service, spreadsheet_id, sheet_name, job_rows)
@@ -1201,18 +1295,7 @@ def export_to_google_sheets(service, jobs: list[dict]) -> str:
 
 
 def parse_output_mode() -> set[str]:
-    aliases = {
-        "excel": {"excel"},
-        "local": {"excel"},
-        "xlsx": {"excel"},
-        "google": {"google_sheets"},
-        "drive": {"google_sheets"},
-        "google_sheets": {"google_sheets"},
-        "sheets": {"google_sheets"},
-        "both": {"excel", "google_sheets"},
-        "all": {"excel", "google_sheets"},
-    }
-    modes = aliases.get(OUTPUT_MODE)
+    modes = OUTPUT_MODE_ALIASES.get(OUTPUT_MODE)
     if modes:
         return modes
 
@@ -1236,11 +1319,14 @@ def format_duration(seconds: float) -> str:
 #  MAIN
 # ─────────────────────────────────────────────
 
+
 def main():
     run_started = time.perf_counter()
 
     if not APIFY_API_TOKEN or APIFY_API_TOKEN == TOKEN_PLACEHOLDER:
-        print(f"❌ Please set {TOKEN_ENV_VAR} in {TOKEN_FILE.name} or as an environment variable.")
+        print(
+            f"❌ Please set {TOKEN_ENV_VAR} in {TOKEN_FILE.name} or as an environment variable."
+        )
         print(f"   Add this line to {TOKEN_FILE.name}:")
         print(f"   {TOKEN_ENV_VAR}={TOKEN_PLACEHOLDER}")
         return
@@ -1266,7 +1352,7 @@ def main():
     print("=" * 60)
     print(f"  Job Scraper — {RUN_STARTED_AT.strftime('%Y-%m-%d %H:%M %Z')}")
     print(f"  UTC start time: {RUN_STARTED_AT_UTC.strftime('%Y-%m-%d %H:%M UTC')}")
-    print(f"  Sources: {', '.join(SOURCE_DISPLAY_NAMES.get(source, source.title()) for source in job_sources)}")
+    print(f"  Sources: {', '.join(source_label(source) for source in job_sources)}")
     if "linkedin" in job_sources:
         print(f"  LinkedIn actor: {LINKEDIN_ACTOR_ID}")
     if "indeed" in job_sources:
@@ -1287,13 +1373,17 @@ def main():
         print(f"  LinkedIn max results/search: {MAX_RESULTS_PER_SEARCH}")
         print(f"  LinkedIn scrape company details: {SCRAPE_COMPANY_DETAILS}")
     if "indeed" in job_sources:
-        print(f"  Indeed country/location: {INDEED_COUNTRY.upper()} / {INDEED_LOCATION}")
+        print(
+            f"  Indeed country/location: {INDEED_COUNTRY.upper()} / {INDEED_LOCATION}"
+        )
         print(f"  Indeed max results/search: {INDEED_MAX_RESULTS_PER_SEARCH}")
         print(f"  Indeed max concurrency: {INDEED_MAX_CONCURRENCY}")
         print(f"  Indeed save unique only: {INDEED_SAVE_ONLY_UNIQUE_ITEMS}")
     print("=" * 60)
 
-    all_results, zero_searches, failed_sources, skipped_searches = run_all_searches(searches)
+    all_results, zero_searches, failed_sources, skipped_searches = run_all_searches(
+        searches
+    )
 
     # ── Deduplicate ──────────────────────────────
     print("\n" + "─" * 60)
@@ -1310,6 +1400,7 @@ def main():
     # ── Sort by posted date (most recent first) ──
     # Keep N/A entries at the bottom
     print("Sorting results ...")
+
     def sort_key(job):
         posted = get_posted(job)
         return posted if posted != "N/A" else "0000"
@@ -1336,7 +1427,9 @@ def main():
 
     # ── Summary ──────────────────────────────────
     print("\n" + "=" * 60)
-    print(f"  Searched {len(searches)} search URL(s) → Found {len(unique_jobs)} unique job postings.")
+    print(
+        f"  Searched {len(searches)} search URL(s) → Found {len(unique_jobs)} unique job postings."
+    )
     print(f"  Total runtime: {format_duration(time.perf_counter() - run_started)}")
     if excluded_title_count:
         print(f"  Excluded by title rule: {excluded_title_count}")
@@ -1347,8 +1440,7 @@ def main():
     if failed_sources:
         print(f"  Failed source(s) ({len(failed_sources)}):")
         for source, message in failed_sources.items():
-            source_label = SOURCE_DISPLAY_NAMES.get(source, source.title())
-            print(f"    • {source_label}: {message[:180]}")
+            print(f"    • {source_label(source)}: {message[:180]}")
     if skipped_searches:
         print(f"  Skipped searches after source failure: {len(skipped_searches)}")
     for label, destination in outputs:

@@ -1,199 +1,235 @@
-# LinkedIn Job Scraper
+# JobScraper
 
-Scrapes LinkedIn jobs daily across geo/GIS-related keywords,
-deduplicates results, and saves them locally as Excel, in Google Sheets,
-or both.
+Scrape recent geo/GIS job postings from Apify-powered LinkedIn and Indeed actors, deduplicate them across keywords, filter unwanted titles, and export each run to Excel, Google Sheets, or both.
 
-Uses Apify actor `curious_coder/linkedin-jobs-scraper`.
+The project is intentionally small: one Python script, one dependency file, one example environment file, and an optional GitHub Actions workflow for scheduled runs.
 
----
+## What It Does
 
-## Files
+1. Builds one search per keyword and selected source.
+2. Runs Apify actors in parallel.
+3. Normalizes fields from LinkedIn and Indeed.
+4. Deduplicates jobs by source and job ID, with a title/company/location fallback.
+5. Tracks every keyword that matched each job.
+6. Removes excluded job titles such as `Werkstudent`.
+7. Saves a new timestamped tab in `jobs.xlsx`, Google Sheets, or both.
 
-| File | Purpose |
+Default search behavior:
+
+| Setting | Default |
 |---|---|
-| `linkedin_job_scraper.py` | Main scraper — run this manually or via scheduler |
+| Sources | LinkedIn only |
+| Location | Germany |
+| Posted window | Last 24 hours |
+| LinkedIn experience levels | Internship, Entry level |
+| LinkedIn job types | Full-time, Part-time, Internship |
+| Excluded titles | `Werkstudent` |
 
----
+## Repository Map
 
-## Setup (one time)
+| Path | Purpose |
+|---|---|
+| `linkedin_job_scraper.py` | Main scraper and exporters |
+| `requirements.txt` | Python dependencies |
+| `requirements-dev.txt` | Runtime dependencies plus local code-check tools |
+| `.env.example` | Copy this to `.env` for local settings |
+| `CONTRIBUTING.md` | Maintainer checklist for safe changes |
+| `.github/workflows/jobs.yml` | Optional daily/manual GitHub Actions run |
+| `jobs.xlsx` | Local output file, generated and ignored by Git |
+| `google_token.json` | Local Google OAuth token, generated and ignored by Git |
+| `google_spreadsheet_id.txt` | Google Sheet ID cache, generated and ignored by Git |
 
-### 1. Install dependencies
+## Quick Start
+
+Use Python 3.11 or newer.
+
 ```bash
-pip install -r requirements.txt
-```
-
-### 2. Get your Apify token
-1. Sign up free at https://apify.com
-2. Go to Settings → API & Integrations
-3. Copy your Personal API Token
-
-### 3. Set your token
-
-Use a local `.env` file. It is ignored by Git, so your token stays out of GitHub.
-
-```bash
-# Mac/Linux
+python -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
 cp .env.example .env
 ```
 
-Then open `.env` and replace the placeholder:
+Open `.env`, replace the Apify placeholder, then run:
+
+```bash
+python linkedin_job_scraper.py
+```
+
+With the default settings, the scraper writes a new sheet tab to `jobs.xlsx`.
+
+## Required Setup
+
+### Apify Token
+
+Create an Apify account, copy your personal API token, and put it in `.env`:
 
 ```bash
 APIFY_API_TOKEN=apify_api_XXXXXXXXXXXX
 ```
 
-The script checks the environment variable first, then falls back to `.env`.
+The script reads real environment variables first and then falls back to `.env`.
 
-You can also override `.env` with an environment variable:
+### Output Mode
 
-```bash
-export APIFY_API_TOKEN=apify_api_XXXXXXXXXXXX
-```
-
-### 4. Set output mode
-
-At the top of `linkedin_job_scraper.py`, choose:
-
-```python
-OUTPUT_MODE = "excel"          # save runs as tabs in local jobs.xlsx
-OUTPUT_MODE = "google_sheets"  # save runs as tabs in one Drive spreadsheet named jobs
-OUTPUT_MODE = "both"           # do both
-```
-
-You can also override it from the terminal:
+Choose one:
 
 ```bash
-export JOBSCRAPER_OUTPUT_MODE=both
+JOBSCRAPER_OUTPUT_MODE=excel
+JOBSCRAPER_OUTPUT_MODE=google_sheets
+JOBSCRAPER_OUTPUT_MODE=both
 ```
 
-### 5. Set up Google Sheets access (only for `google_sheets` or `both`)
+`excel` needs only local dependencies. `google_sheets` and `both` need Google setup.
 
-In Google Cloud, enable the Google Sheets API, create an OAuth client for a
-desktop app, download the JSON file, and save it in this folder as:
+## Google Sheets Setup
 
-```text
-google_client_secret.json
-```
+Use this only when `JOBSCRAPER_OUTPUT_MODE` is `google_sheets` or `both`.
 
-On the first run, the script opens a Google login page. After you approve access,
-it saves a local `google_token.json` file so future runs can create Sheets
-without asking again. Local Google credential/token/id files are ignored by Git.
+1. In Google Cloud, enable the Google Sheets API.
+2. Create an OAuth client for a desktop app.
+3. Download the client JSON.
+4. Save it in this repository as `google_client_secret.json`.
+5. Run the scraper locally once.
+6. Complete the browser-based Google login.
 
-The first Google Sheets run creates one spreadsheet named `jobs` and stores its
-ID in `google_spreadsheet_id.txt`. Future runs add new tabs to that same
-spreadsheet.
+After the first approved run, the script creates `google_token.json`. Future local runs reuse it.
 
-If you use cron or another scheduler, run the script manually once first so
-`google_token.json` is created.
+The first Google Sheets export creates a spreadsheet named `jobs` and writes its ID to `google_spreadsheet_id.txt`. Future runs add new tabs to the same spreadsheet. You can also set `GOOGLE_SPREADSHEET_ID` in `.env` to force a specific spreadsheet.
 
----
+## Configuration
+
+Prefer `.env` for settings that are likely to change. Edit constants in `linkedin_job_scraper.py` only for deeper changes such as keywords, LinkedIn filters, output filenames, or title exclusion rules.
+
+### Common `.env` Settings
+
+| Name | Default | Description |
+|---|---:|---|
+| `APIFY_API_TOKEN` | required | Apify API token |
+| `JOBSCRAPER_OUTPUT_MODE` | `excel` | `excel`, `google_sheets`, or `both` |
+| `JOBSCRAPER_SOURCES` | `linkedin` | `linkedin`, `indeed`, or `both` |
+| `JOBSCRAPER_SEARCH_CONCURRENCY` | `15` | Number of keyword searches started in parallel |
+| `JOBSCRAPER_MAX_RESULTS_PER_SEARCH` | `500` | LinkedIn result cap per keyword |
+| `APIFY_RUN_MEMORY_MB` | `512` | Memory assigned to each Apify actor run |
+| `APIFY_RUN_TIMEOUT_SECONDS` | `300` | Apify actor timeout per search |
+| `APIFY_CLIENT_TIMEOUT_SECONDS` | `360` | Local HTTP timeout for Apify API calls |
+| `JOBSCRAPER_DELAY_BETWEEN_REQUESTS` | `0` | Delay between starting keyword searches |
+| `JOBSCRAPER_SCRAPE_COMPANY_DETAILS` | `false` | Ask LinkedIn actor for extra company details |
+| `JOBSCRAPER_USE_INCOGNITO_MODE` | `true` | LinkedIn actor incognito mode |
+| `JOBSCRAPER_SPLIT_BY_LOCATION` | `false` | LinkedIn actor split-by-location mode |
+| `JOBSCRAPER_TIMEZONE` | `Europe/Rome` | Terminal logs and output tab names |
+| `JOBSCRAPER_POSTED_TIMEZONE` | `Europe/Berlin` | `Posted` column timezone |
+| `GOOGLE_SPREADSHEET_ID` | blank | Optional existing Google Sheet ID |
+
+### Indeed `.env` Settings
+
+These apply when `JOBSCRAPER_SOURCES` is `indeed` or `both`.
+
+| Name | Default | Description |
+|---|---:|---|
+| `INDEED_COUNTRY` | `DE` | Indeed country code |
+| `INDEED_LOCATION` | `Germany` | Indeed location query |
+| `INDEED_MAX_RESULTS_PER_SEARCH` | `500` | Indeed result cap per keyword |
+| `INDEED_MAX_CONCURRENCY` | `5` | Actor-level Indeed concurrency |
+| `INDEED_SAVE_ONLY_UNIQUE_ITEMS` | `true` | Ask actor to keep unique results only |
+
+### Script Constants
+
+Edit these directly in `linkedin_job_scraper.py` when you want to change the actual search strategy:
+
+| Constant | Purpose |
+|---|---|
+| `KEYWORDS` | Search phrases |
+| `LOCATION` / `GEO_ID` | LinkedIn location |
+| `PUBLISHED_AT` | LinkedIn posted-time filter |
+| `EXPERIENCE_LEVELS` | LinkedIn experience filters |
+| `CONTRACT_TYPES` | LinkedIn job type filters |
+| `EXCLUDED_TITLE_TERMS` | Final case-insensitive title filters |
+| `EXCEL_OUTPUT_FILE` | Local workbook path |
+| `SPREADSHEET_TITLE` | Google spreadsheet title for first creation |
 
 ## Running
 
-### Manual (one-off run)
+### One-Off Local Run
+
 ```bash
 python linkedin_job_scraper.py
 ```
-Output: `jobs.xlsx`, a Google Sheet URL, or both, depending on `OUTPUT_MODE`.
-Each run is saved as a new tab named with the run date and time.
 
-### Mac/Linux: use cron instead (cleaner)
+### Run Both Sources Once
+
+```bash
+JOBSCRAPER_SOURCES=both python linkedin_job_scraper.py
+```
+
+### Local Cron Example
+
 ```bash
 crontab -e
 ```
-Add this line (runs at 8am daily):
-```
-0 8 * * * cd /path/to/your/folder && python linkedin_job_scraper.py
+
+Run daily at 08:00:
+
+```cron
+0 8 * * * cd /path/to/JobScraper && /path/to/JobScraper/.venv/bin/python linkedin_job_scraper.py
 ```
 
----
+## GitHub Actions
 
-## Output columns
+The workflow in `.github/workflows/jobs.yml` can run manually or once daily during the 07:00 UTC hour. It exports to Google Sheets.
+
+Required repository secrets:
+
+| Secret | Purpose |
+|---|---|
+| `APIFY_API_TOKEN` | Apify token |
+| `GOOGLE_TOKEN_JSON` | Contents of a locally generated `google_token.json` |
+| `GOOGLE_SPREADSHEET_ID` | Target Google spreadsheet ID |
+
+Recommended setup:
+
+1. Configure Google Sheets locally first.
+2. Confirm a local `google_sheets` run works.
+3. Copy the contents of `google_token.json` into the GitHub secret `GOOGLE_TOKEN_JSON`.
+4. Copy the target spreadsheet ID into `GOOGLE_SPREADSHEET_ID`.
+5. Add `APIFY_API_TOKEN`.
+6. Run the workflow manually from the Actions tab.
+
+GitHub-hosted runners are temporary, so they cannot complete browser-based Google OAuth during a workflow run. That is why `GOOGLE_TOKEN_JSON` must come from a local first-time login.
+
+## Output Columns
 
 | Column | Description |
 |---|---|
-| Application Status | Google Sheets dropdown: applied, rejected, interview, accepted |
+| Application Status | Empty Excel cell or Google Sheets dropdown: applied, rejected, interview, accepted |
 | App | Source app, such as LinkedIn or Indeed |
 | Job Title | Position name |
 | Company | Employer name |
-| Location | City / region |
+| Location | City or region |
 | Job Type | Text from the job source |
-| Posted | Europe/Berlin date and time, formatted as a date-time column in Google Sheets |
+| Posted | Date and time in `JOBSCRAPER_POSTED_TIMEZONE` |
 | Applicants | Applicant count if visible |
 | Keywords Matched | All keywords that returned this job |
 | Job URL | Clickable link to the job posting |
 | Apply URL | Clickable external application link if available |
 
----
+## Troubleshooting
 
-## Filters applied (every search)
+| Problem | What to Check |
+|---|---|
+| `Please set APIFY_API_TOKEN` | `.env` exists and `APIFY_API_TOKEN` is not the placeholder |
+| Apify returns `401` or `403` | Token is valid, account can run the actor, billing or trial access is active |
+| Many timeouts | Lower `JOBSCRAPER_SEARCH_CONCURRENCY`, increase `APIFY_RUN_TIMEOUT_SECONDS`, or increase `APIFY_CLIENT_TIMEOUT_SECONDS` |
+| Google credential error | `google_client_secret.json` exists locally, or GitHub has `GOOGLE_TOKEN_JSON` |
+| Spreadsheet not found | Check `GOOGLE_SPREADSHEET_ID` or delete local `google_spreadsheet_id.txt` to create a new `jobs` spreadsheet |
+| `tzdata` or timezone error | Install dependencies from `requirements.txt` and use valid IANA timezones |
+| Empty or low results | Check source filters, Apify actor health, posted-time window, and title exclusions |
 
-- Posted: Last 24 hours
-- Experience level: Internship OR Entry level
-- Job type: Internship OR Part-time OR Full-time
-- Location: Germany
-- Excluded titles: any job title containing `Werkstudent` (case-insensitive)
+## Notes For Maintainers
 
----
-
-## Customisation
-
-All settings are at the top of `linkedin_job_scraper.py`:
-
-```python
-MAX_RESULTS_PER_SEARCH = 500  # increase for more results (uses more credits)
-SEARCH_CONCURRENCY = 15  # run this many keyword searches at the same time
-APIFY_RUN_MEMORY_MB = 512  # memory for each child Apify actor run
-APIFY_RUN_TIMEOUT_SECONDS = 300
-OUTPUT_MODE = "excel"  # choose: excel, google_sheets, both
-CONTRACT_TYPES = ["F", "P", "I"]  # full-time, part-time, internship
-EXPERIENCE_LEVELS = ["1", "2"]  # internship, entry level
-LOCATION = "Germany"
-GEO_ID = "101282230"
-SCRAPE_COMPANY_DETAILS = False
-USE_INCOGNITO_MODE = True
-SPLIT_BY_LOCATION = False
-SPLIT_COUNTRY = "DE"
-EXCLUDED_TITLE_TERMS = ["Werkstudent"]
-DELAY_BETWEEN_REQUESTS = 0
-POSTED_TIMEZONE = "Europe/Berlin"
-EXCEL_OUTPUT_FILE = Path(__file__).with_name("jobs.xlsx")
-SPREADSHEET_TITLE = "jobs"
-```
-
-The most useful speed settings can also be overridden from the terminal or from
-Apify environment variables:
-
-```bash
-export JOBSCRAPER_SEARCH_CONCURRENCY=15
-export APIFY_RUN_MEMORY_MB=512
-export APIFY_RUN_TIMEOUT_SECONDS=300
-export JOBSCRAPER_DELAY_BETWEEN_REQUESTS=0
-export JOBSCRAPER_SCRAPE_COMPANY_DETAILS=false
-export JOBSCRAPER_POSTED_TIMEZONE=Europe/Berlin
-```
-
-Recommended tuning order:
-
-1. Start with `JOBSCRAPER_SEARCH_CONCURRENCY=15`.
-2. Drop back to `14`, `8`, `6`, or `4` if you see timeouts, failed actor runs, or suspiciously empty results.
-3. Keep `APIFY_RUN_MEMORY_MB=512` with an 8 GB Apify limit; `15 × 512 MB = 7680 MB`.
-
-To add/remove keywords, edit the `KEYWORDS` list.
-To change location, edit `LOCATION`.
-
----
-
-## Apify usage and speed
-
-The selected actor is priced per result. The default setup runs each search
-with up to 500 jobs each, so check your Apify Console before
-increasing limits.
-
-This script mostly waits for Apify actor runs to finish, so the local process can
-show low RAM usage even on an 8 GB Apify container. The biggest speed gain comes
-from `JOBSCRAPER_SEARCH_CONCURRENCY`, because it starts multiple keyword searches
-at once. `APIFY_RUN_MEMORY_MB` controls the memory assigned to each child actor
-run started through the Apify API; it is separate from the memory assigned to the
-container running this script.
+- Do not commit `.env`, Google credential files, generated workbooks, or token files.
+- Keep `.env.example` in sync when adding environment settings.
+- Keep output columns stable unless downstream users are ready for the change.
+- The scraper intentionally uses simple local files instead of a database.
+- Apify actors may cost money per result or run; review actor pricing before raising limits.
