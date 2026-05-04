@@ -22,9 +22,12 @@ on:
           - excel
           - both
   schedule:
-    # Avoid minute 0 because GitHub may delay or drop scheduled jobs at the top of the hour.
-    - cron: "17 10 * * *"
-      timezone: "Europe/Rome"
+    # GitHub scheduled workflows can be delayed or dropped under high load.
+    # These UTC entries avoid minute 0 and cover Europe/Rome daylight saving time:
+    # - 08:17 UTC = 10:17 Europe/Rome during CEST
+    # - 09:17 UTC = 10:17 Europe/Rome during CET
+    - cron: "17 8 * * *"
+    - cron: "17 9 * * *"
 
 permissions:
   contents: read
@@ -56,20 +59,31 @@ jobs:
       TZ: Europe/Rome
 
     steps:
-      - name: Log Europe/Rome run time
+      - name: Check Europe/Rome schedule window
         id: schedule_guard
         shell: bash
         run: |
           set -euo pipefail
 
           europe_time="$(TZ=Europe/Rome date +'%Y-%m-%d %H:%M:%S %Z')"
-          echo "Current Europe/Rome time: ${europe_time}"
-          echo "should_run=true" >> "$GITHUB_OUTPUT"
+          europe_offset="$(TZ=Europe/Rome date +'%z')"
+          trigger_schedule="${{ github.event.schedule }}"
 
-          if [ "${GITHUB_EVENT_NAME}" = "schedule" ]; then
-            echo "Scheduled run requested. Continuing even if GitHub started it late."
-          else
+          echo "Current Europe/Rome time: ${europe_time}"
+          echo "Current Europe/Rome UTC offset: ${europe_offset}"
+
+          if [ "${GITHUB_EVENT_NAME}" != "schedule" ]; then
+            echo "should_run=true" >> "$GITHUB_OUTPUT"
             echo "Manual run requested."
+          elif [ "${europe_offset}" = "+0200" ] && [ "${trigger_schedule}" = "17 8 * * *" ]; then
+            echo "should_run=true" >> "$GITHUB_OUTPUT"
+            echo "CEST schedule requested. Continuing even if GitHub started it late."
+          elif [ "${europe_offset}" = "+0100" ] && [ "${trigger_schedule}" = "17 9 * * *" ]; then
+            echo "should_run=true" >> "$GITHUB_OUTPUT"
+            echo "CET schedule requested. Continuing even if GitHub started it late."
+          else
+            echo "should_run=false" >> "$GITHUB_OUTPUT"
+            echo "Inactive DST schedule requested (${trigger_schedule}). Skipping scraper."
           fi
 
       - name: Checkout repository
