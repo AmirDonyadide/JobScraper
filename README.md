@@ -23,7 +23,7 @@ Default search behavior:
 | Posted window | Last 24 hours |
 | LinkedIn experience levels | Internship, Entry level |
 | LinkedIn job types | Full-time, Part-time, Internship |
-| Excluded titles | `Werkstudent` |
+| Excluded titles | `Werkstudent`, `Working Student`, `Senior` |
 
 ## Repository Map
 
