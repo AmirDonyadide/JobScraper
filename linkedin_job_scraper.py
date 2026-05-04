@@ -35,7 +35,7 @@ from openpyxl.utils import get_column_letter
 
 TOKEN_ENV_VAR = "APIFY_API_TOKEN"
 TOKEN_FILE = Path(__file__).with_name(".env")
-TOKEN_PLACEHOLDER = "apify_api_XXXXXXXXXXXX"
+TOKEN_PLACEHOLDER = "YOUR_APIFY_API_TOKEN_HERE"
 GOOGLE_CLIENT_SECRET_FILE = Path(__file__).with_name("google_client_secret.json")
 GOOGLE_TOKEN_FILE = Path(__file__).with_name("google_token.json")
 GOOGLE_SPREADSHEET_ID_FILE = Path(__file__).with_name("google_spreadsheet_id.txt")
@@ -49,8 +49,6 @@ def load_local_env() -> dict[str, str]:
     Load simple KEY=value settings from local .env.
 
     Supported .env formats:
-        APIFY_API_TOKEN=apify_api_XXXXXXXXXXXX
-        export APIFY_API_TOKEN=apify_api_XXXXXXXXXXXX
     """
     values = {}
     if not TOKEN_FILE.exists():
@@ -193,43 +191,71 @@ INDEED_SAVE_ONLY_UNIQUE_ITEMS = load_bool_setting("INDEED_SAVE_ONLY_UNIQUE_ITEMS
 # ─────────────────────────────────────────────
 
 KEYWORDS = [
-    "3D Mapping",
-    "Bauvermessung",
-    "Cartography",
-    "Earth Observation",
-    "Erdbeobachtung",
-    "Fernerkundung",
-    "GeoAI",
-    "Geoanalytics",
-    "Geodaten",
-    "Geodatenanalyse",
-    "Geodatenbank",
-    "Geodatenmanagement",
-    "Geodäsie",
-    "Geoinformatik",
-    "Geoinformatiker",
-    "Geoinformationssysteme",
-    "Geomatik",
-    "Geomatics",
-    "Geomatiker",
-    "Geospatial",
-    "Geovisualisierung",
-    "GIS",
-    "GIS Fachkraft",
-    "GIS Analyst",
-    "GIS Entwickler",
-    "GIS Spezialist",
-    "Kartografie",
-    "Laserscanning",
-    "Photogrammetrie",
-    "Raumdaten",
-    "Remote Sensing",
-    "Land Surveying",
-    "Topografie",
-    "Trassierung",
-    "Vermessung",
-    "Vermessungsingenieur",
-    "Vermessungstechniker",
+    # Core Roles
+    "Data Scientist",
+    "AI Engineer",
+    "Applied AI",
+    "Artificial Intelligence",
+    "Data Analyst",
+    "Analytics Engineer",
+
+    # AI / ML
+    "Machine Learning",
+    "Model Development",
+    "Model Evaluation",
+    "Feature Engineering",
+    "Experimentation",
+    "A/B Testing",
+    "Explainable AI",
+    "Responsible AI",
+
+    # NLP / LLM / GenAI
+    "NLP",
+    "Natural Language Processing",
+    "LLM",
+    "Large Language Models",
+    "Generative AI",
+    "Prompt Engineering",
+    "RAG",
+    "Retrieval Augmented Generation",
+    "Text Processing",
+    "Text Analytics",
+
+    # Strengths / Niche
+    "Recommender Systems",
+    "User Behavior Analysis",
+    "Behavioral Data",
+    "Decision Support Systems",
+    "Human-centered AI",
+    "Data-driven Systems",
+
+    # Domain (VERY IMPORTANT FOR YOU)
+    "AI for Healthcare",
+    "Health AI",
+    "Medical AI",
+    "Digital Health",
+    "Healthcare Analytics",
+
+    # Data / Engineering
+    "Data Pipelines",
+    "Data Engineering",
+    "Data Processing",
+
+    # German Keywords (CRUCIAL in Germany)
+    "KI Engineer",
+    "Künstliche Intelligenz",
+    "Datenanalyst",
+    "Datenwissenschaftler",
+    "Datenanalyse",
+    "Datenpipeline",
+    "Datenengineering",
+    "Generative KI",
+    "Sprachverarbeitung",
+    "Empfehlungssysteme",
+    "Recommender Systeme",
+    "Medizinische KI",
+    "Gesundheitsdaten",
+    "Digital Health"
 ]
 
 # ─────────────────────────────────────────────
