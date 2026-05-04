@@ -12,22 +12,11 @@ on:
           - linkedin
           - indeed
           - both
-      output_mode:
-        description: "Where to save results"
-        required: true
-        default: "google_sheets"
-        type: choice
-        options:
-          - google_sheets
-          - excel
-          - both
+
   schedule:
-    # GitHub scheduled workflows can be delayed or dropped under high load.
-    # These UTC entries avoid minute 0 and cover Europe/Rome daylight saving time:
-    # - 08:17 UTC = 10:17 Europe/Rome during CEST
-    # - 09:17 UTC = 10:17 Europe/Rome during CET
-    - cron: "17 8 * * *"
-    - cron: "17 9 * * *"
+    # Runs once daily during the 07:00 UTC hour. Avoid minute 0 because GitHub
+    # may delay or drop scheduled jobs at the top of the hour under high load.
+    - cron: "17 7 * * *"
 
 permissions:
   contents: read
@@ -46,52 +35,23 @@ jobs:
       APIFY_API_TOKEN: ${{ secrets.APIFY_API_TOKEN }}
       GOOGLE_SPREADSHEET_ID: ${{ secrets.GOOGLE_SPREADSHEET_ID }}
       GOOGLE_TOKEN_JSON: ${{ secrets.GOOGLE_TOKEN_JSON }}
-      JOBSCRAPER_OUTPUT_MODE: ${{ github.event.inputs.output_mode || 'google_sheets' }}
+      JOBSCRAPER_OUTPUT_MODE: "google_sheets"
       JOBSCRAPER_SOURCES: ${{ github.event.inputs.sources || 'linkedin' }}
       JOBSCRAPER_SEARCH_CONCURRENCY: "15"
       APIFY_RUN_MEMORY_MB: "512"
       APIFY_RUN_TIMEOUT_SECONDS: "300"
       JOBSCRAPER_DELAY_BETWEEN_REQUESTS: "0"
       JOBSCRAPER_SCRAPE_COMPANY_DETAILS: "false"
-      JOBSCRAPER_TIMEZONE: Europe/Rome
+      JOBSCRAPER_TIMEZONE: Europe/Berlin
       JOBSCRAPER_POSTED_TIMEZONE: Europe/Berlin
       PYTHONUNBUFFERED: "1"
-      TZ: Europe/Rome
+      TZ: Europe/Berlin
 
     steps:
-      - name: Check Europe/Rome schedule window
-        id: schedule_guard
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          europe_time="$(TZ=Europe/Rome date +'%Y-%m-%d %H:%M:%S %Z')"
-          europe_offset="$(TZ=Europe/Rome date +'%z')"
-          trigger_schedule="${{ github.event.schedule }}"
-
-          echo "Current Europe/Rome time: ${europe_time}"
-          echo "Current Europe/Rome UTC offset: ${europe_offset}"
-
-          if [ "${GITHUB_EVENT_NAME}" != "schedule" ]; then
-            echo "should_run=true" >> "$GITHUB_OUTPUT"
-            echo "Manual run requested."
-          elif [ "${europe_offset}" = "+0200" ] && [ "${trigger_schedule}" = "17 8 * * *" ]; then
-            echo "should_run=true" >> "$GITHUB_OUTPUT"
-            echo "CEST schedule requested. Continuing even if GitHub started it late."
-          elif [ "${europe_offset}" = "+0100" ] && [ "${trigger_schedule}" = "17 9 * * *" ]; then
-            echo "should_run=true" >> "$GITHUB_OUTPUT"
-            echo "CET schedule requested. Continuing even if GitHub started it late."
-          else
-            echo "should_run=false" >> "$GITHUB_OUTPUT"
-            echo "Inactive DST schedule requested (${trigger_schedule}). Skipping scraper."
-          fi
-
       - name: Checkout repository
-        if: steps.schedule_guard.outputs.should_run == 'true'
         uses: actions/checkout@v6
 
       - name: Set up Python
-        if: steps.schedule_guard.outputs.should_run == 'true'
         uses: actions/setup-python@v6
         with:
           python-version: "3.11"
@@ -99,15 +59,12 @@ jobs:
           cache-dependency-path: requirements.txt
 
       - name: Upgrade pip
-        if: steps.schedule_guard.outputs.should_run == 'true'
         run: python -m pip install --upgrade pip
 
       - name: Install dependencies
-        if: steps.schedule_guard.outputs.should_run == 'true'
         run: python -m pip install -r requirements.txt
 
       - name: Validate required secrets
-        if: steps.schedule_guard.outputs.should_run == 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -119,18 +76,14 @@ jobs:
             missing=1
           fi
 
-          needs_google="false"
-          if [ "${JOBSCRAPER_OUTPUT_MODE}" = "google_sheets" ] || [ "${JOBSCRAPER_OUTPUT_MODE}" = "both" ]; then
-            needs_google="true"
-          fi
-
-          if [ "${needs_google}" = "true" ] && [ -z "${GOOGLE_TOKEN_JSON}" ]; then
+          if [ -z "${GOOGLE_TOKEN_JSON}" ]; then
             echo "::error::Missing repository secret GOOGLE_TOKEN_JSON. GitHub Actions cannot complete browser-based Google OAuth."
             missing=1
           fi
 
-          if [ "${needs_google}" = "true" ] && [ -z "${GOOGLE_SPREADSHEET_ID}" ]; then
-            echo "::warning::GOOGLE_SPREADSHEET_ID is not set. The script can create a new spreadsheet, but a persistent secret is recommended."
+          if [ -z "${GOOGLE_SPREADSHEET_ID}" ]; then
+            echo "::error::Missing repository secret GOOGLE_SPREADSHEET_ID. GitHub Actions runners are temporary, so the spreadsheet ID must be saved as a secret."
+            missing=1
           fi
 
           if [ "$missing" -ne 0 ]; then
@@ -138,7 +91,6 @@ jobs:
           fi
 
       - name: Write Google credential files
-        if: steps.schedule_guard.outputs.should_run == 'true' && env.JOBSCRAPER_OUTPUT_MODE != 'excel'
         shell: bash
         run: |
           set -euo pipefail
@@ -163,7 +115,6 @@ jobs:
           fi
 
       - name: Run scraper
-        if: steps.schedule_guard.outputs.should_run == 'true'
         shell: bash
         run: |
           set -o pipefail
@@ -180,8 +131,8 @@ jobs:
           from datetime import datetime, timezone
           from zoneinfo import ZoneInfo
 
-          local_time = datetime.now(timezone.utc).astimezone(ZoneInfo("Europe/Rome"))
-          print("Python Europe/Rome time check:", local_time.strftime("%Y-%m-%d %H:%M:%S %Z"))
+          local_time = datetime.now(timezone.utc).astimezone(ZoneInfo("Europe/Berlin"))
+          print("Python Europe/Berlin time check:", local_time.strftime("%Y-%m-%d %H:%M:%S %Z"))
           PY
 
           python -u linkedin_job_scraper.py 2>&1 | tee scraper.log
@@ -194,16 +145,8 @@ jobs:
 
           echo "Scraper finished successfully."
 
-      - name: Upload Excel artifact
-        if: always() && steps.schedule_guard.outputs.should_run == 'true' && env.JOBSCRAPER_OUTPUT_MODE != 'google_sheets'
-        uses: actions/upload-artifact@v4
-        with:
-          name: jobs-xlsx-${{ github.run_id }}
-          path: jobs.xlsx
-          if-no-files-found: warn
-
       - name: Print spreadsheet hint
-        if: always() && steps.schedule_guard.outputs.should_run == 'true' && env.JOBSCRAPER_OUTPUT_MODE != 'excel'
+        if: always()
         shell: bash
         run: |
           if [ -f google_spreadsheet_id.txt ]; then
