@@ -229,3 +229,7 @@ jobs_*.xlsx
 google_client_secret.json
 google_token.json
 google_spreadsheet_id.txt
+
+# Private evaluator inputs
+cv/master_cv.tex
+prompts/master_prompt.txt

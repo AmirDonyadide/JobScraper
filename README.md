@@ -18,9 +18,11 @@ JobScraper/
 │   ├── filters.json
 │   └── keywords.txt
 ├── cv/
-│   └── master_cv.tex
+│   ├── master_cv.example.tex
+│   └── master_cv.tex              # private, ignored by Git
 ├── prompts/
-│   └── master_prompt.txt
+│   ├── master_prompt.example.txt
+│   └── master_prompt.txt          # private, ignored by Git
 ├── scripts/
 │   ├── evaluate_jobs.py
 │   ├── run_pipeline.py
@@ -101,6 +103,19 @@ Google Sheets output also needs `google_client_secret.json` for first local
 OAuth login. After login, `google_token.json` and `google_spreadsheet_id.txt`
 are generated locally and ignored by Git.
 
+## Private Evaluator Files
+
+The evaluator needs a master prompt and a LaTeX CV, but the real files are
+private and ignored by Git:
+
+```bash
+cp prompts/master_prompt.example.txt prompts/master_prompt.txt
+cp cv/master_cv.example.tex cv/master_cv.tex
+```
+
+Edit `prompts/master_prompt.txt` and `cv/master_cv.tex` with your own private
+content before running AI evaluation. Commit only the `.example` files.
+
 ## Configuration
 
 Edit these files for normal scraper behavior:
@@ -110,8 +125,10 @@ Edit these files for normal scraper behavior:
 | `configs/keywords.txt` | Search keywords, one per line. Blank lines and comments are ignored. |
 | `configs/filters.json` | LinkedIn search filters, title exclusions, applicant limit, and spreadsheet dropdown values. |
 | `.env` | Secrets, runtime overrides, output mode, sources, and concurrency settings. |
-| `prompts/master_prompt.txt` | Master prompt used by the evaluator. |
-| `cv/master_cv.tex` | Master LaTeX CV included in evaluator prompts. |
+| `prompts/master_prompt.example.txt` | Safe template for the private evaluator prompt. |
+| `cv/master_cv.example.tex` | Safe template for the private LaTeX CV. |
+| `prompts/master_prompt.txt` | Private master prompt used by the evaluator; ignored by Git. |
+| `cv/master_cv.tex` | Private LaTeX CV included in evaluator prompts; ignored by Git. |
 
 Common `.env` settings:
 
