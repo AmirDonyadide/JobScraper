@@ -5,8 +5,10 @@ from __future__ import annotations
 import logging
 import random
 import time
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import UTC, datetime
+from threading import Lock
 
 from jobscraper.evaluator.models import (
     EvaluationError,
@@ -34,6 +36,27 @@ roles that should be skipped, are unrealistic, or are only borderline. After
 those two lines, include the reason text and, if required by the MASTER PROMPT,
 the tailored LaTeX CV.
 """.strip()
+
+
+class RequestPacer:
+    """Thread-safe delay between OpenAI request starts."""
+
+    def __init__(self, delay_seconds: float) -> None:
+        self.delay_seconds = delay_seconds
+        self._lock = Lock()
+        self._next_request_at = 0.0
+
+    def wait(self) -> None:
+        """Sleep until the next OpenAI request slot is available."""
+        if self.delay_seconds <= 0:
+            return
+
+        with self._lock:
+            now = time.monotonic()
+            if now < self._next_request_at:
+                time.sleep(self._next_request_at - now)
+                now = time.monotonic()
+            self._next_request_at = max(now, self._next_request_at) + self.delay_seconds
 
 
 def retry_after_seconds(exc: Exception) -> float | None:
@@ -192,6 +215,9 @@ def evaluate_records(
     latex_cv: str,
     concurrency: int,
     batch_size: int,
+    large_queue_threshold: int = 200,
+    large_queue_sleep_ms: int = 2000,
+    on_evaluation: Callable[[JobEvaluation], None] | None = None,
 ) -> dict[int, JobEvaluation]:
     """Evaluate queued records in batches with bounded concurrency."""
     results: dict[int, JobEvaluation] = {}
@@ -200,6 +226,22 @@ def evaluate_records(
 
     batches = batch_items(records, batch_size)
     completed = 0
+    request_pacer: RequestPacer | None = None
+    if large_queue_sleep_ms > 0 and len(records) > large_queue_threshold:
+        delay_seconds = large_queue_sleep_ms / 1000
+        request_pacer = RequestPacer(delay_seconds)
+        LOGGER.info(
+            "Large queue pacing enabled: %sms between OpenAI request starts "
+            "because %s queued row(s) exceed the %s-row threshold.",
+            large_queue_sleep_ms,
+            len(records),
+            large_queue_threshold,
+        )
+
+    def evaluate_record(record: JobRecord) -> JobEvaluation:
+        if request_pacer is not None:
+            request_pacer.wait()
+        return evaluator.evaluate(record, master_prompt, latex_cv)
 
     for batch_idx, batch in enumerate(batches, start=1):
         LOGGER.info(
@@ -211,12 +253,7 @@ def evaluate_records(
         max_workers = min(max(1, concurrency), len(batch))
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             futures = {
-                executor.submit(
-                    evaluator.evaluate,
-                    record,
-                    master_prompt,
-                    latex_cv,
-                ): record
+                executor.submit(evaluate_record, record): record
                 for record in batch
             }
             for future in as_completed(futures):
@@ -241,6 +278,13 @@ def evaluate_records(
                     )
 
                 results[record.row_number] = evaluation
+                if on_evaluation is not None:
+                    try:
+                        on_evaluation(evaluation)
+                    except Exception:
+                        for pending_future in futures:
+                            pending_future.cancel()
+                        raise
                 completed += 1
                 score = (
                     f"{evaluation.fit_score}%"

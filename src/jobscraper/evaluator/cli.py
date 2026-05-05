@@ -96,6 +96,8 @@ def validate_runtime_settings(
     concurrency: int,
     retries: int,
     max_output_tokens: int,
+    large_queue_threshold: int = 200,
+    large_queue_sleep_ms: int = 2000,
 ) -> None:
     """Validate evaluator runtime settings before doing any I/O."""
     if batch_size < 1:
@@ -108,6 +110,10 @@ def validate_runtime_settings(
         raise EvaluationError(
             "JOB_EVAL_MAX_OUTPUT_TOKENS is too small for reliable parsing."
         )
+    if large_queue_threshold < 0:
+        raise EvaluationError("JOB_EVAL_LARGE_QUEUE_THRESHOLD must be 0 or greater.")
+    if large_queue_sleep_ms < 0:
+        raise EvaluationError("JOB_EVAL_LARGE_QUEUE_SLEEP_MS must be 0 or greater.")
 
 
 def load_input_rows(
@@ -152,6 +158,8 @@ def write_outputs(
     headers: list[str],
     header_map: dict[str, int],
     evaluations: dict[int, Any],
+    *,
+    cleanup_columns: bool = True,
 ) -> None:
     """Write evaluator headers and result values back to the selected source."""
     if source == "excel":
@@ -162,6 +170,7 @@ def write_outputs(
             headers,
             header_map,
             evaluations,
+            cleanup_columns=cleanup_columns,
         )
     else:
         write_google_output(
@@ -171,6 +180,7 @@ def write_outputs(
             headers,
             header_map,
             evaluations,
+            cleanup_columns=cleanup_columns,
         )
 
 
@@ -194,12 +204,16 @@ def main() -> int:
         retry_max_delay = env.get_float("JOB_EVAL_RETRY_MAX_DELAY", 60.0)
         timeout = env.get_float("JOB_EVAL_OPENAI_TIMEOUT", 120.0)
         max_output_tokens = env.get_int("JOB_EVAL_MAX_OUTPUT_TOKENS", 9000)
+        large_queue_threshold = env.get_int("JOB_EVAL_LARGE_QUEUE_THRESHOLD", 200)
+        large_queue_sleep_ms = env.get_int("JOB_EVAL_LARGE_QUEUE_SLEEP_MS", 2000)
 
         validate_runtime_settings(
             batch_size=batch_size,
             concurrency=concurrency,
             retries=retries,
             max_output_tokens=max_output_tokens,
+            large_queue_threshold=large_queue_threshold,
+            large_queue_sleep_ms=large_queue_sleep_ms,
         )
 
         master_prompt = read_text_asset(master_prompt_file, "master prompt")
@@ -264,6 +278,23 @@ def main() -> int:
             max_delay=retry_max_delay,
             max_output_tokens=max_output_tokens,
         )
+
+        def save_evaluation(evaluation: Any) -> None:
+            LOGGER.info("Saving evaluation for row %s ...", evaluation.row_number)
+            write_outputs(
+                excel_file,
+                source,
+                spreadsheet_id,
+                google_service,
+                workbook,
+                worksheet,
+                sheet_name,
+                headers,
+                header_map,
+                {evaluation.row_number: evaluation},
+                cleanup_columns=False,
+            )
+
         evaluations = evaluate_records(
             records,
             evaluator=evaluator,
@@ -271,10 +302,13 @@ def main() -> int:
             latex_cv=latex_cv,
             concurrency=concurrency,
             batch_size=batch_size,
+            large_queue_threshold=large_queue_threshold,
+            large_queue_sleep_ms=large_queue_sleep_ms,
+            on_evaluation=save_evaluation,
         )
 
         LOGGER.info(
-            "Writing %s evaluation(s) back to the same sheet ...",
+            "Finalizing output columns after %s saved evaluation(s) ...",
             len(evaluations),
         )
         write_outputs(
@@ -287,7 +321,8 @@ def main() -> int:
             sheet_name,
             headers,
             header_map,
-            evaluations,
+            {},
+            cleanup_columns=True,
         )
         if source == "excel":
             LOGGER.info("Saved Excel workbook: %s (sheet: %s)", excel_file, sheet_name)

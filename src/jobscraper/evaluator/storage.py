@@ -91,6 +91,8 @@ def write_excel_output(
     headers: list[str],
     header_map: dict[str, int],
     evaluations: dict[int, JobEvaluation],
+    *,
+    cleanup_columns: bool = True,
 ) -> None:
     """Write evaluator columns and results back to an Excel worksheet."""
     for col_idx, header in enumerate(headers, start=1):
@@ -104,7 +106,8 @@ def write_excel_output(
                 column=column_idx,
             ).value = evaluation.value_for_column(column)
 
-    remove_excel_columns_after_evaluation(worksheet, headers)
+    if cleanup_columns:
+        remove_excel_columns_after_evaluation(worksheet, headers)
     workbook.save(path)
 
 
@@ -165,6 +168,8 @@ def write_google_output(
     headers: list[str],
     header_map: dict[str, int],
     evaluations: dict[int, JobEvaluation],
+    *,
+    cleanup_columns: bool = True,
 ) -> None:
     """Write evaluator columns and results back to a Google Sheet tab."""
     data = []
@@ -197,12 +202,13 @@ def write_google_output(
             },
         ).execute()
 
-    remove_google_columns_after_evaluation(
-        service,
-        spreadsheet_id,
-        sheet_name,
-        headers,
-    )
+    if cleanup_columns:
+        remove_google_columns_after_evaluation(
+            service,
+            spreadsheet_id,
+            sheet_name,
+            headers,
+        )
 
 
 def get_google_sheet_id(service: Any, spreadsheet_id: str, sheet_name: str) -> int:

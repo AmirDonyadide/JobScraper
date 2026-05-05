@@ -122,6 +122,8 @@ Common settings:
 | `JOB_EVAL_OPENAI_MODEL` | `gpt-5-mini` | OpenAI model used for evaluation. |
 | `JOB_EVAL_CONCURRENCY` | `8` | Number of OpenAI job evaluations run at the same time. |
 | `JOB_EVAL_BATCH_SIZE` | `40` | Number of jobs processed per evaluator batch. |
+| `JOB_EVAL_LARGE_QUEUE_THRESHOLD` | `200` | Enable request pacing when more than this many rows are queued for OpenAI. |
+| `JOB_EVAL_LARGE_QUEUE_SLEEP_MS` | `2000` | Milliseconds to wait between OpenAI request starts for large queues. |
 
 ## Google Sheets Setup For Local Use
 
@@ -298,9 +300,13 @@ The current workflow uses:
 ```yaml
 JOB_EVAL_CONCURRENCY: "8"
 JOB_EVAL_BATCH_SIZE: "40"
+JOB_EVAL_LARGE_QUEUE_THRESHOLD: "200"
+JOB_EVAL_LARGE_QUEUE_SLEEP_MS: "2000"
 ```
 
 This means up to 8 OpenAI requests can run at the same time, with jobs grouped locally in batches of 40.
+
+When more than 200 rows are queued, the evaluator also spaces OpenAI request starts by 2000 ms. Each row is saved back to the same sheet immediately after it is evaluated, so a later failure keeps the completed rows.
 
 If you see OpenAI rate-limit or retry warnings, reduce them in `.github/workflows/jobs.yml`:
 
