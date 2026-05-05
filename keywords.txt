@@ -21,7 +21,6 @@ Geomatics
 Geomatiker
 Geospatial
 Geovisualisierung
-GIS
 GIS Fachkraft
 GIS Analyst
 GIS Entwickler
