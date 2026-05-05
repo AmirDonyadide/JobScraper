@@ -1,0 +1,17 @@
+{
+  "linkedin_search": {
+    "location": "Germany",
+    "geo_id": "101282230",
+    "published_at": "r86400",
+    "experience_levels": ["1", "2"],
+    "contract_types": ["F", "P", "I"],
+    "split_country": "DE"
+  },
+  "final_filters": {
+    "excluded_title_terms": ["Werkstudent", "Work Student", "Working Student", "Senior"],
+    "max_applicants": 100
+  },
+  "spreadsheet": {
+    "application_status_options": ["applied", "rejected", "interview", "accepted"]
+  }
+}

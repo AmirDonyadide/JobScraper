@@ -1,8 +1,8 @@
 # JobScraper
 
-Scrape recent geo/GIS job postings from Apify-powered LinkedIn and Indeed actors, deduplicate them across keywords, filter unwanted titles, and export each run to Excel, Google Sheets, or both.
+Scrape recent geo/GIS job postings from Apify-powered LinkedIn and Indeed actors, deduplicate them across keywords, filter unwanted titles and high-applicant jobs, and export each run to Excel, Google Sheets, or both.
 
-The project is intentionally small: one Python script, one dependency file, one example environment file, and an optional GitHub Actions workflow for scheduled runs.
+The project is intentionally small: one main scraper, one config-loader helper, user-editable keyword/filter files, dependency files, and an optional GitHub Actions workflow for scheduled runs.
 
 ## What It Does
 
@@ -12,7 +12,8 @@ The project is intentionally small: one Python script, one dependency file, one 
 4. Deduplicates jobs by source and job ID, with a title/company/location fallback.
 5. Tracks every keyword that matched each job.
 6. Removes excluded job titles such as `Werkstudent`.
-7. Saves a new timestamped tab in `jobs.xlsx`, Google Sheets, or both.
+7. Removes jobs with more than the configured applicant limit.
+8. Saves a new timestamped tab in `jobs.xlsx`, Google Sheets, or both.
 
 Default search behavior:
 
@@ -24,12 +25,16 @@ Default search behavior:
 | LinkedIn experience levels | Internship, Entry level |
 | LinkedIn job types | Full-time, Part-time, Internship |
 | Excluded titles | `Werkstudent`, `Working Student`, `Senior` |
+| Max applicants | `100` |
 
 ## Repository Map
 
 | Path | Purpose |
 |---|---|
 | `linkedin_job_scraper.py` | Main scraper and exporters |
+| `job_scraper_config.py` | Loads user-editable config files |
+| `keywords.txt` | Search keywords, one per line |
+| `filters.json` | Search filters, excluded words, applicant limit, and spreadsheet dropdown words |
 | `requirements.txt` | Python dependencies |
 | `requirements-dev.txt` | Runtime dependencies plus local code-check tools |
 | `.env.example` | Copy this to `.env` for local settings |
@@ -58,6 +63,7 @@ python linkedin_job_scraper.py
 ```
 
 With the default settings, the scraper writes a new sheet tab to `jobs.xlsx`.
+To change what gets searched or filtered, edit `keywords.txt` and `filters.json`.
 
 ## Required Setup
 
@@ -100,7 +106,26 @@ The first Google Sheets export creates a spreadsheet named `jobs` and writes its
 
 ## Configuration
 
-Prefer `.env` for settings that are likely to change. Edit constants in `linkedin_job_scraper.py` only for deeper changes such as keywords, LinkedIn filters, output filenames, or title exclusion rules.
+Use `keywords.txt` and `filters.json` for normal search/filter changes. The main Python scraper contains the workflow, so other users should not need to edit it when they only want to change keywords or filtered words.
+
+### Editable Config Files
+
+| File | What to Change |
+|---|---|
+| `keywords.txt` | Search keywords. Add one keyword per line. Blank lines and lines starting with `#` are ignored. |
+| `filters.json` | LinkedIn location/search values, excluded title terms, maximum applicant count, and spreadsheet status dropdown words. |
+
+`filters.json` sections:
+
+| Section | Purpose |
+|---|---|
+| `linkedin_search` | LinkedIn URL filters such as `location`, `geo_id`, `published_at`, `experience_levels`, and `contract_types` |
+| `final_filters` | Final result filters such as `excluded_title_terms` and `max_applicants`. Title terms are matched case-insensitively and ignore spaces, hyphens, and punctuation. |
+| `spreadsheet` | Spreadsheet dropdown words such as `application_status_options` |
+
+For example, an excluded title term of `Work Student` also removes titles containing `workstudent`, `Workstudent`, or `WORK-STUDENT`.
+
+Use `.env` for secrets, output mode, source selection, and runtime settings.
 
 ### Common `.env` Settings
 
@@ -134,20 +159,9 @@ These apply when `JOBSCRAPER_SOURCES` is `indeed` or `both`.
 | `INDEED_MAX_CONCURRENCY` | `5` | Actor-level Indeed concurrency |
 | `INDEED_SAVE_ONLY_UNIQUE_ITEMS` | `true` | Ask actor to keep unique results only |
 
-### Script Constants
+### Advanced Overrides
 
-Edit these directly in `linkedin_job_scraper.py` when you want to change the actual search strategy:
-
-| Constant | Purpose |
-|---|---|
-| `KEYWORDS` | Search phrases |
-| `LOCATION` / `GEO_ID` | LinkedIn location |
-| `PUBLISHED_AT` | LinkedIn posted-time filter |
-| `EXPERIENCE_LEVELS` | LinkedIn experience filters |
-| `CONTRACT_TYPES` | LinkedIn job type filters |
-| `EXCLUDED_TITLE_TERMS` | Final case-insensitive title filters |
-| `EXCEL_OUTPUT_FILE` | Local workbook path |
-| `SPREADSHEET_TITLE` | Google spreadsheet title for first creation |
+`filters.json` is the preferred place to change `max_applicants`. For automation, `JOBSCRAPER_MAX_APPLICANTS` can still be set as an environment variable to override that one value.
 
 ## Running
 
@@ -224,7 +238,8 @@ GitHub-hosted runners are temporary, so they cannot complete browser-based Googl
 | Google credential error | `google_client_secret.json` exists locally, or GitHub has `GOOGLE_TOKEN_JSON` |
 | Spreadsheet not found | Check `GOOGLE_SPREADSHEET_ID` or delete local `google_spreadsheet_id.txt` to create a new `jobs` spreadsheet |
 | `tzdata` or timezone error | Install dependencies from `requirements.txt` and use valid IANA timezones |
-| Empty or low results | Check source filters, Apify actor health, posted-time window, and title exclusions |
+| Missing or invalid config file | Check `keywords.txt` and `filters.json` |
+| Empty or low results | Check source filters, Apify actor health, posted-time window, title exclusions, and applicant-count exclusions |
 
 ## Notes For Maintainers
 

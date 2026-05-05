@@ -18,6 +18,7 @@ Usage:
 
 import json
 import os
+import re
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
@@ -30,8 +31,17 @@ import requests
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
+from job_scraper_config import (
+    ConfigFileError,
+    config_int,
+    config_list,
+    config_str,
+    load_filter_config,
+    load_keywords,
+)
+
 # ─────────────────────────────────────────────
-#  CONFIGURATION — edit these
+#  RUNTIME CONFIGURATION
 # ─────────────────────────────────────────────
 
 TOKEN_ENV_VAR = "APIFY_API_TOKEN"
@@ -73,6 +83,12 @@ def load_local_env() -> dict[str, str]:
 
 
 LOCAL_ENV = load_local_env()
+
+try:
+    FILTER_CONFIG = load_filter_config()
+    KEYWORDS = load_keywords()
+except ConfigFileError as e:
+    raise RuntimeError(f"Configuration error: {e}") from e
 
 
 def load_setting(name: str, default: str = "") -> str:
@@ -199,65 +215,54 @@ SPREADSHEET_TITLE = "jobs"
 # f_E values   -> 1=Internship, 2=Entry level
 # f_JT values  -> F=Full-time, P=Part-time, I=Internship
 
-LOCATION = "Germany"
-GEO_ID = "101282230"
-PUBLISHED_AT = "r86400"
-EXPERIENCE_LEVELS = ["1", "2"]
-CONTRACT_TYPES = ["F", "P", "I"]
+LOCATION = config_str(FILTER_CONFIG, "linkedin_search", "location", "Germany")
+GEO_ID = config_str(FILTER_CONFIG, "linkedin_search", "geo_id", "101282230")
+PUBLISHED_AT = config_str(FILTER_CONFIG, "linkedin_search", "published_at", "r86400")
+EXPERIENCE_LEVELS = config_list(
+    FILTER_CONFIG, "linkedin_search", "experience_levels", ["1", "2"]
+)
+CONTRACT_TYPES = config_list(
+    FILTER_CONFIG, "linkedin_search", "contract_types", ["F", "P", "I"]
+)
 SCRAPE_COMPANY_DETAILS = load_bool_setting("JOBSCRAPER_SCRAPE_COMPANY_DETAILS", False)
 USE_INCOGNITO_MODE = load_bool_setting("JOBSCRAPER_USE_INCOGNITO_MODE", True)
 SPLIT_BY_LOCATION = load_bool_setting("JOBSCRAPER_SPLIT_BY_LOCATION", False)
-SPLIT_COUNTRY = "DE"
-EXCLUDED_TITLE_TERMS = ["Werkstudent", "Working Student", "Senior"]
+SPLIT_COUNTRY = config_str(FILTER_CONFIG, "linkedin_search", "split_country", "DE")
+EXCLUDED_TITLE_TERMS = config_list(
+    FILTER_CONFIG,
+    "final_filters",
+    "excluded_title_terms",
+    ["Werkstudent", "Working Student", "Senior"],
+)
+CONFIG_MAX_APPLICANTS = config_int(
+    FILTER_CONFIG, "final_filters", "max_applicants", 100
+)
+MAX_APPLICANTS = max(
+    0, load_int_setting("JOBSCRAPER_MAX_APPLICANTS", CONFIG_MAX_APPLICANTS)
+)
+
+APPLICANT_COUNT_KEYS = (
+    "applicantsCount",
+    "applicants_count",
+    "applicantCount",
+    "applicant_count",
+    "numberOfApplicants",
+    "number_of_applicants",
+    "numApplicants",
+    "num_applicants",
+    "formattedApplicantsCount",
+    "applicantsLabel",
+    "applicants",
+)
+APPLICANT_NUMBER_RE = re.compile(
+    r"(?P<number>\d[\d,.]*)\s*(?P<unit>k)?\s*(?P<plus>\+)?",
+    re.IGNORECASE,
+)
 
 INDEED_COUNTRY = load_setting("INDEED_COUNTRY", "DE").upper()
 INDEED_LOCATION = load_setting("INDEED_LOCATION", LOCATION)
 INDEED_MAX_CONCURRENCY = load_int_setting("INDEED_MAX_CONCURRENCY", 5)
 INDEED_SAVE_ONLY_UNIQUE_ITEMS = load_bool_setting("INDEED_SAVE_ONLY_UNIQUE_ITEMS", True)
-
-# ─────────────────────────────────────────────
-#  KEYWORDS
-# ─────────────────────────────────────────────
-
-KEYWORDS = [
-    "3D Mapping",
-    "Bauvermessung",
-    "Cartography",
-    "Earth Observation",
-    "Erdbeobachtung",
-    "Fernerkundung",
-    "GeoAI",
-    "Geoanalytics",
-    "Geodaten",
-    "Geodatenanalyse",
-    "Geodatenbank",
-    "Geodatenmanagement",
-    "Geodäsie",
-    "Geoinformatik",
-    "Geoinformatiker",
-    "Geoinformationssysteme",
-    "Geomatik",
-    "Geomatics",
-    "Geomatiker",
-    "Geospatial",
-    "Geovisualisierung",
-    "GIS",
-    "GIS Fachkraft",
-    "GIS Analyst",
-    "GIS Entwickler",
-    "GIS Spezialist",
-    "Kartografie",
-    "Laserscanning",
-    "Photogrammetrie",
-    "Raumdaten",
-    "Remote Sensing",
-    "Land Surveying",
-    "Topografie",
-    "Trassierung",
-    "Vermessung",
-    "Vermessungsingenieur",
-    "Vermessungstechniker",
-]
 
 # ─────────────────────────────────────────────
 #  APIFY API CALL
@@ -737,6 +742,79 @@ def get_apply_url(job: dict) -> str:
     )
 
 
+def get_applicants(job: dict) -> str:
+    return field(job, *APPLICANT_COUNT_KEYS)
+
+
+def parse_applicant_number(number_text: str, unit: str) -> int | None:
+    if unit:
+        normalized = number_text.replace(",", ".")
+        try:
+            return int(float(normalized) * 1000)
+        except ValueError:
+            return None
+
+    normalized = re.sub(r"[,.]", "", number_text)
+    try:
+        return int(normalized)
+    except ValueError:
+        return None
+
+
+def parse_applicant_count_value(value) -> int | None:
+    if value in (None, "", "N/A"):
+        return None
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return int(value) if value >= 0 else None
+    if isinstance(value, dict):
+        parsed_counts = [
+            parse_applicant_count_value(value[key])
+            for key in (*APPLICANT_COUNT_KEYS, "count", "value", "text", "label")
+            if key in value
+        ]
+        parsed_counts = [count for count in parsed_counts if count is not None]
+        return max(parsed_counts) if parsed_counts else None
+    if isinstance(value, list):
+        parsed_counts = [parse_applicant_count_value(item) for item in value]
+        parsed_counts = [count for count in parsed_counts if count is not None]
+        return max(parsed_counts) if parsed_counts else None
+
+    text = str(value).strip()
+    if not text or text == "N/A":
+        return None
+
+    parsed_counts = []
+    for match in APPLICANT_NUMBER_RE.finditer(text):
+        count = parse_applicant_number(match.group("number"), match.group("unit"))
+        if count is None:
+            continue
+
+        prefix = text[max(0, match.start() - 20) : match.start()].casefold()
+        if (
+            match.group("plus")
+            or "over" in prefix
+            or "more than" in prefix
+            or ">" in prefix
+        ):
+            count += 1
+
+        parsed_counts.append(count)
+
+    return max(parsed_counts) if parsed_counts else None
+
+
+def get_applicant_count(job: dict) -> int | None:
+    for key in APPLICANT_COUNT_KEYS:
+        if key not in job:
+            continue
+        applicant_count = parse_applicant_count_value(job.get(key))
+        if applicant_count is not None:
+            return applicant_count
+    return None
+
+
 def parse_datetime_value(value):
     if value in (None, ""):
         return None
@@ -779,13 +857,38 @@ def format_posted_value(value) -> str:
     return sheet_safe(value)
 
 
+def normalize_filter_text(value: str) -> str:
+    return "".join(char for char in value.casefold() if char.isalnum())
+
+
 def has_excluded_title(job: dict) -> bool:
-    title = get_title(job).casefold()
-    return any(term.casefold() in title for term in EXCLUDED_TITLE_TERMS)
+    title = get_title(job)
+    title_casefolded = title.casefold()
+    title_normalized = normalize_filter_text(title)
+
+    for term in EXCLUDED_TITLE_TERMS:
+        term_casefolded = term.casefold()
+        term_normalized = normalize_filter_text(term)
+        if term_casefolded in title_casefolded:
+            return True
+        if term_normalized and term_normalized in title_normalized:
+            return True
+
+    return False
 
 
 def filter_excluded_titles(jobs: list[dict]) -> tuple[list[dict], int]:
     filtered_jobs = [job for job in jobs if not has_excluded_title(job)]
+    return filtered_jobs, len(jobs) - len(filtered_jobs)
+
+
+def has_too_many_applicants(job: dict) -> bool:
+    applicant_count = get_applicant_count(job)
+    return applicant_count is not None and applicant_count > MAX_APPLICANTS
+
+
+def filter_applicant_count(jobs: list[dict]) -> tuple[list[dict], int]:
+    filtered_jobs = [job for job in jobs if not has_too_many_applicants(job)]
     return filtered_jobs, len(jobs) - len(filtered_jobs)
 
 
@@ -807,7 +910,12 @@ HEADER = [
     "Apply URL",
 ]
 
-APPLICATION_STATUS_OPTIONS = ["applied", "rejected", "interview", "accepted"]
+APPLICATION_STATUS_OPTIONS = config_list(
+    FILTER_CONFIG,
+    "spreadsheet",
+    "application_status_options",
+    ["applied", "rejected", "interview", "accepted"],
+)
 
 MAX_CELL_CHARS = 49000
 
@@ -870,7 +978,7 @@ def make_job_rows(jobs: list[dict]) -> list[list]:
                 get_location(job),
                 get_job_type(job),
                 get_posted(job),
-                field(job, "applicantsCount", "applicants_count"),
+                get_applicants(job),
                 ", ".join(job.get("keywords_matched", [])),
                 hyperlink_formula(job_url, "Open Job"),
                 hyperlink_formula(apply_url, "Open Apply"),
@@ -1363,6 +1471,7 @@ def main():
     print(f"  Posted timezone: {POSTED_TIMEZONE}")
     print(f"  Searches: {len(searches)}")
     print(f"  Search concurrency: {SEARCH_CONCURRENCY}")
+    print(f"  Max applicants/job: {MAX_APPLICANTS}")
     print(f"  Apify child run memory: {APIFY_RUN_MEMORY_MB} MB")
     print(f"  Apify child run timeout: {APIFY_RUN_TIMEOUT_SECONDS}s")
     if DELAY_BETWEEN_REQUESTS:
@@ -1396,6 +1505,14 @@ def main():
     unique_jobs, excluded_title_count = filter_excluded_titles(unique_jobs)
     terms = ", ".join(EXCLUDED_TITLE_TERMS)
     print(f"  → Removed {excluded_title_count} job(s) containing: {terms}")
+
+    # ── Final applicant count exclusions ────────
+    print("Applying applicant count filter ...")
+    unique_jobs, excluded_applicant_count = filter_applicant_count(unique_jobs)
+    print(
+        f"  → Removed {excluded_applicant_count} job(s) with more than "
+        f"{MAX_APPLICANTS} applicant(s)"
+    )
 
     # ── Sort by posted date (most recent first) ──
     # Keep N/A entries at the bottom
@@ -1433,6 +1550,8 @@ def main():
     print(f"  Total runtime: {format_duration(time.perf_counter() - run_started)}")
     if excluded_title_count:
         print(f"  Excluded by title rule: {excluded_title_count}")
+    if excluded_applicant_count:
+        print(f"  Excluded by applicant count: {excluded_applicant_count}")
     if zero_searches:
         print(f"  Searches with 0 results ({len(zero_searches)}):")
         for label in zero_searches:
