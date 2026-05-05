@@ -12,11 +12,6 @@ on:
           - linkedin
           - indeed
           - both
-      evaluation_limit:
-        description: "Optional evaluator row limit for manual test runs. Leave empty for all rows."
-        required: false
-        default: ""
-        type: string
 
   schedule:
     # Runs once daily during the 07:00 UTC hour. Avoid minute 0 because GitHub
@@ -41,6 +36,9 @@ jobs:
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       GOOGLE_SPREADSHEET_ID: ${{ secrets.GOOGLE_SPREADSHEET_ID }}
       GOOGLE_TOKEN_JSON: ${{ secrets.GOOGLE_TOKEN_JSON }}
+      JOB_KEYWORDS_TEXT: ${{ secrets.JOB_KEYWORDS_TEXT }}
+      MASTER_PROMPT_TEXT: ${{ secrets.MASTER_PROMPT_TEXT }}
+      MASTER_CV_TEX: ${{ secrets.MASTER_CV_TEX }}
       JOBSCRAPER_OUTPUT_MODE: "google_sheets"
       JOBSCRAPER_SOURCES: ${{ github.event.inputs.sources || 'linkedin' }}
       JOBSCRAPER_SEARCH_CONCURRENCY: "15"
@@ -53,7 +51,6 @@ jobs:
       JOB_EVAL_OPENAI_MODEL: "gpt-5-mini"
       JOB_EVAL_CONCURRENCY: "2"
       JOB_EVAL_BATCH_SIZE: "10"
-      JOB_EVAL_LIMIT: ${{ github.event.inputs.evaluation_limit || '' }}
       PYTHONUNBUFFERED: "1"
       TZ: Europe/Berlin
 
@@ -101,9 +98,44 @@ jobs:
             missing=1
           fi
 
+          if [ -z "${JOB_KEYWORDS_TEXT}" ]; then
+            echo "::error::Missing repository secret JOB_KEYWORDS_TEXT."
+            missing=1
+          fi
+
+          if [ -z "${MASTER_PROMPT_TEXT}" ]; then
+            echo "::error::Missing repository secret MASTER_PROMPT_TEXT."
+            missing=1
+          fi
+
+          if [ -z "${MASTER_CV_TEX}" ]; then
+            echo "::error::Missing repository secret MASTER_CV_TEX."
+            missing=1
+          fi
+
           if [ "$missing" -ne 0 ]; then
             exit 1
           fi
+
+      - name: Write private input files
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          python - <<'PY'
+          import os
+          from pathlib import Path
+
+          private_files = {
+              Path("configs/keywords.txt"): os.environ["JOB_KEYWORDS_TEXT"],
+              Path("prompts/master_prompt.txt"): os.environ["MASTER_PROMPT_TEXT"],
+              Path("cv/master_cv.tex"): os.environ["MASTER_CV_TEX"],
+          }
+
+          for path, value in private_files.items():
+              path.parent.mkdir(parents=True, exist_ok=True)
+              path.write_text(value.strip() + "\n", encoding="utf-8")
+          PY
 
       - name: Write Google credential files
         shell: bash
@@ -143,31 +175,8 @@ jobs:
           echo "Apify child run memory: ${APIFY_RUN_MEMORY_MB} MB"
           echo "Evaluator model: ${JOB_EVAL_OPENAI_MODEL}"
           echo "Evaluator concurrency: ${JOB_EVAL_CONCURRENCY}"
-          if [ -n "${JOB_EVAL_LIMIT}" ]; then
-            echo "Evaluator row limit: ${JOB_EVAL_LIMIT}"
-          fi
 
-          python - <<'PY'
-          from datetime import datetime, timezone
-          from zoneinfo import ZoneInfo
-
-          local_time = datetime.now(timezone.utc).astimezone(ZoneInfo("Europe/Berlin"))
-          print("Python Europe/Berlin time check:", local_time.strftime("%Y-%m-%d %H:%M:%S %Z"))
-          PY
-
-          pipeline_args=(
-            --sources "${JOBSCRAPER_SOURCES}"
-            --model "${JOB_EVAL_OPENAI_MODEL}"
-            --concurrency "${JOB_EVAL_CONCURRENCY}"
-            --batch-size "${JOB_EVAL_BATCH_SIZE}"
-          )
-
-          if [ -n "${JOB_EVAL_LIMIT}" ]; then
-            pipeline_args+=(--limit "${JOB_EVAL_LIMIT}")
-          fi
-
-          python -u run_job_pipeline.py "${pipeline_args[@]}" \
-            2>&1 | tee pipeline.log
+          python -u run_job_pipeline.py 2>&1 | tee pipeline.log
           status=${PIPESTATUS[0]}
 
           if [ "$status" -ne 0 ]; then

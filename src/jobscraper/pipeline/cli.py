@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import logging
 import os
 import subprocess
 import sys
@@ -10,6 +11,8 @@ import sys
 from jobscraper.env import load_local_env
 from jobscraper.paths import ENV_FILE, PROJECT_ROOT
 from jobscraper.scraper.settings import TOKEN_PLACEHOLDER
+
+LOGGER = logging.getLogger("jobscraper.pipeline")
 
 
 def setting(local_env: dict[str, str], name: str, default: str = "") -> str:
@@ -53,9 +56,7 @@ def validate_python_dependencies() -> None:
 
 def run_step(command: list[str], env: dict[str, str], label: str) -> None:
     """Run one pipeline child command and stop on non-zero exit."""
-    print("\n" + "=" * 70, flush=True)
-    print(label, flush=True)
-    print("=" * 70, flush=True)
+    LOGGER.info(label)
     result = subprocess.run(command, cwd=PROJECT_ROOT, env=env, check=False)
     if result.returncode:
         raise SystemExit(result.returncode)
@@ -65,47 +66,9 @@ def build_arg_parser() -> argparse.ArgumentParser:
     """Build the pipeline CLI argument parser."""
     parser = argparse.ArgumentParser(
         description=(
-            "Scrape LinkedIn jobs to Google Sheets, then evaluate them with OpenAI."
+            "Run the full JobScraper workflow: scrape jobs to Google Sheets, "
+            "then evaluate every unevaluated row with OpenAI."
         )
-    )
-    parser.add_argument(
-        "--sources",
-        choices=["linkedin", "indeed", "both"],
-        default="linkedin",
-        help="Job source(s) to scrape before evaluation. Default: linkedin.",
-    )
-    parser.add_argument(
-        "--sheet",
-        default="latest",
-        help="Google Sheet tab to evaluate after scraping. Default: latest.",
-    )
-    parser.add_argument(
-        "--model",
-        default="gpt-5-mini",
-        help="OpenAI model for evaluation. Default: gpt-5-mini.",
-    )
-    parser.add_argument(
-        "--limit",
-        type=int,
-        default=None,
-        help="Optional evaluation limit for testing. Omit to evaluate all rows.",
-    )
-    parser.add_argument(
-        "--concurrency",
-        type=int,
-        default=2,
-        help="Concurrent OpenAI evaluation requests. Default: 2.",
-    )
-    parser.add_argument(
-        "--batch-size",
-        type=int,
-        default=10,
-        help="Evaluation batch size. Default: 10.",
-    )
-    parser.add_argument(
-        "--reevaluate",
-        action="store_true",
-        help="Re-evaluate rows even if AI Verdict already exists.",
     )
     return parser
 
@@ -121,17 +84,21 @@ def child_pythonpath() -> str:
 
 def main() -> int:
     """Run the two-step scraper and evaluator pipeline."""
-    args = build_arg_parser().parse_args()
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(message)s",
+        datefmt="%H:%M:%S",
+    )
+    build_arg_parser().parse_args()
     local_env = load_local_env()
     validate_required_settings(local_env)
     validate_python_dependencies()
 
     env = os.environ.copy()
-    env.update(local_env)
+    for key, value in local_env.items():
+        env.setdefault(key, value)
     env["PYTHONPATH"] = child_pythonpath()
     env["JOBSCRAPER_OUTPUT_MODE"] = "google_sheets"
-    env["JOBSCRAPER_SOURCES"] = args.sources
-    env["JOB_EVAL_OPENAI_MODEL"] = args.model
 
     scrape_command = [sys.executable, "-m", "jobscraper.scraper.cli"]
     evaluate_command = [
@@ -141,24 +108,14 @@ def main() -> int:
         "--source",
         "google_sheets",
         "--sheet",
-        args.sheet,
-        "--model",
-        args.model,
-        "--concurrency",
-        str(args.concurrency),
-        "--batch-size",
-        str(args.batch_size),
+        "latest",
     ]
-    if args.limit is not None:
-        evaluate_command.extend(["--limit", str(args.limit)])
-    if args.reevaluate:
-        evaluate_command.append("--reevaluate")
 
     run_step(scrape_command, env, "Step 1/2: Scraping jobs to Google Sheets")
     run_step(evaluate_command, env, "Step 2/2: Evaluating jobs with OpenAI")
 
-    print(
-        "\nPipeline complete. Your Google Sheet now includes the AI evaluation columns."
+    LOGGER.info(
+        "Pipeline complete. Your Google Sheet now includes the AI evaluation columns."
     )
     return 0
 

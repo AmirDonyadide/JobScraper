@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
 from typing import Any
 
 from jobscraper.paths import FILTERS_FILE, KEYWORDS_FILE
+
+LOGGER = logging.getLogger(__name__)
 
 
 class ConfigFileError(RuntimeError):
@@ -72,7 +75,13 @@ def config_int(config: dict[str, Any], section: str, name: str, default: int) ->
     try:
         return int(value)
     except (TypeError, ValueError):
-        print(f"⚠ Invalid integer for {section}.{name}={value!r}, using {default}.")
+        LOGGER.warning(
+            "Invalid integer for %s.%s=%r; using %s.",
+            section,
+            name,
+            value,
+            default,
+        )
         return default
 
 
@@ -87,7 +96,7 @@ def config_list(
     elif isinstance(value, list):
         items = value
     else:
-        print(f"⚠ Invalid list for {section}.{name}, using defaults.")
+        LOGGER.warning("Invalid list for %s.%s; using defaults.", section, name)
         items = default
 
     return [

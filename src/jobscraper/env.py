@@ -54,10 +54,7 @@ class EnvSettings:
             return int(value)
         except ValueError:
             message = f"Invalid integer for {name}={value!r}; using {default}."
-            if self.logger:
-                self.logger.warning(message)
-            else:
-                print(f"⚠ {message}")
+            (self.logger or logging.getLogger(__name__)).warning(message)
             return default
 
     def get_float(self, name: str, default: float) -> float:
@@ -67,10 +64,7 @@ class EnvSettings:
             return float(value)
         except ValueError:
             message = f"Invalid float for {name}={value!r}; using {default}."
-            if self.logger:
-                self.logger.warning(message)
-            else:
-                print(f"⚠ {message}")
+            (self.logger or logging.getLogger(__name__)).warning(message)
             return default
 
     def get_bool(self, name: str, default: bool) -> bool:
@@ -82,8 +76,5 @@ class EnvSettings:
             return False
 
         message = f"Invalid boolean for {name}={value!r}; using {default}."
-        if self.logger:
-            self.logger.warning(message)
-        else:
-            print(f"⚠ {message}")
+        (self.logger or logging.getLogger(__name__)).warning(message)
         return default

@@ -134,9 +134,7 @@ def extract_job_records(
     headers: list[str],
     rows: list[list[Any]],
     *,
-    start_row: int,
-    limit: int | None,
-    reevaluate: bool,
+    reevaluate_existing: bool = False,
 ) -> tuple[list[JobRecord], int]:
     """Extract queued evaluator records from worksheet rows."""
     header_map = build_header_map(headers)
@@ -145,11 +143,11 @@ def extract_job_records(
     skipped_existing = 0
 
     for offset, row in enumerate(rows, start=2):
-        if offset < start_row or row_is_empty(row):
+        if row_is_empty(row):
             continue
 
         if (
-            not reevaluate
+            not reevaluate_existing
             and verdict_idx is not None
             and clean_cell_text(get_row_value(row, verdict_idx))
             and clean_cell_text(get_row_value(row, verdict_idx)) != "Error"
@@ -169,9 +167,6 @@ def extract_job_records(
                 advertisement=advertisement,
             )
         )
-
-        if limit is not None and len(records) >= limit:
-            break
 
     return records, skipped_existing
 

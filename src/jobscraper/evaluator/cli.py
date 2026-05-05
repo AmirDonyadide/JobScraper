@@ -64,69 +64,19 @@ def build_arg_parser(env: EnvSettings | None = None) -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Evaluate job postings with OpenAI and update the same sheet."
     )
-    parser.add_argument("--source", choices=["excel", "google_sheets"], default=None)
     parser.add_argument(
-        "--excel-file",
-        default=env.get("JOB_EVAL_EXCEL_FILE", str(DEFAULT_EXCEL_FILE)),
+        "--source",
+        choices=["excel", "google_sheets"],
+        default=None,
+        help=(
+            "Where to read jobs from. Defaults to Google Sheets when a spreadsheet "
+            "ID is configured, otherwise Excel."
+        ),
     )
     parser.add_argument(
-        "--google-sheet-id",
-        default=env.get("JOB_EVAL_GOOGLE_SPREADSHEET_ID"),
-    )
-    parser.add_argument("--sheet", default=env.get("JOB_EVAL_SHEET", "latest"))
-    parser.add_argument(
-        "--master-prompt",
-        default=env.get("JOB_EVAL_MASTER_PROMPT_FILE", str(DEFAULT_MASTER_PROMPT_FILE)),
-    )
-    parser.add_argument(
-        "--cv", default=env.get("JOB_EVAL_CV_FILE", str(DEFAULT_CV_FILE))
-    )
-    parser.add_argument(
-        "--model",
-        default=env.get("JOB_EVAL_OPENAI_MODEL", DEFAULT_MODEL),
-    )
-    parser.add_argument("--limit", type=int, default=None)
-    parser.add_argument(
-        "--start-row", type=int, default=env.get_int("JOB_EVAL_START_ROW", 2)
-    )
-    parser.add_argument(
-        "--batch-size", type=int, default=env.get_int("JOB_EVAL_BATCH_SIZE", 10)
-    )
-    parser.add_argument(
-        "--concurrency", type=int, default=env.get_int("JOB_EVAL_CONCURRENCY", 2)
-    )
-    parser.add_argument(
-        "--retries", type=int, default=env.get_int("JOB_EVAL_OPENAI_RETRIES", 3)
-    )
-    parser.add_argument(
-        "--retry-base-delay",
-        type=float,
-        default=env.get_float("JOB_EVAL_RETRY_BASE_DELAY", 2.0),
-    )
-    parser.add_argument(
-        "--retry-max-delay",
-        type=float,
-        default=env.get_float("JOB_EVAL_RETRY_MAX_DELAY", 60.0),
-    )
-    parser.add_argument(
-        "--timeout",
-        type=float,
-        default=env.get_float("JOB_EVAL_OPENAI_TIMEOUT", 120.0),
-    )
-    parser.add_argument(
-        "--max-output-tokens",
-        type=int,
-        default=env.get_int("JOB_EVAL_MAX_OUTPUT_TOKENS", 9000),
-    )
-    parser.add_argument(
-        "--reevaluate",
-        action="store_true",
-        help="Evaluate rows even when AI Verdict is already populated.",
-    )
-    parser.add_argument(
-        "--dry-run",
-        action="store_true",
-        help="Read rows and build prompts, but do not call OpenAI or save output.",
+        "--sheet",
+        default=env.get("JOB_EVAL_SHEET", "latest"),
+        help="Worksheet or Google Sheet tab to evaluate. Defaults to the latest tab.",
     )
     return parser
 
@@ -140,30 +90,37 @@ def configure_logging() -> None:
     )
 
 
-def validate_args(args: argparse.Namespace) -> None:
-    """Validate evaluator CLI arguments before doing any I/O."""
-    if args.start_row < 2:
-        raise EvaluationError("--start-row must be 2 or greater.")
-    if args.batch_size < 1:
-        raise EvaluationError("--batch-size must be 1 or greater.")
-    if args.concurrency < 1:
-        raise EvaluationError("--concurrency must be 1 or greater.")
-    if args.retries < 0:
-        raise EvaluationError("--retries must be 0 or greater.")
-    if args.max_output_tokens < 500:
-        raise EvaluationError("--max-output-tokens is too small for reliable parsing.")
+def validate_runtime_settings(
+    *,
+    batch_size: int,
+    concurrency: int,
+    retries: int,
+    max_output_tokens: int,
+) -> None:
+    """Validate evaluator runtime settings before doing any I/O."""
+    if batch_size < 1:
+        raise EvaluationError("JOB_EVAL_BATCH_SIZE must be 1 or greater.")
+    if concurrency < 1:
+        raise EvaluationError("JOB_EVAL_CONCURRENCY must be 1 or greater.")
+    if retries < 0:
+        raise EvaluationError("JOB_EVAL_OPENAI_RETRIES must be 0 or greater.")
+    if max_output_tokens < 500:
+        raise EvaluationError(
+            "JOB_EVAL_MAX_OUTPUT_TOKENS is too small for reliable parsing."
+        )
 
 
 def load_input_rows(
     args: argparse.Namespace,
     source: str,
     spreadsheet_id: str,
+    excel_file: Path,
 ) -> tuple[Any, Any, Any, str, list[str], list[list[Any]]]:
     """Read evaluator input rows from Excel or Google Sheets."""
     google_service = None
     if source == "excel":
         workbook, worksheet, sheet_name, headers, rows = read_excel_input(
-            Path(args.excel_file),
+            excel_file,
             args.sheet,
         )
     else:
@@ -185,7 +142,7 @@ def load_input_rows(
 
 
 def write_outputs(
-    args: argparse.Namespace,
+    excel_file: Path,
     source: str,
     spreadsheet_id: str,
     google_service: Any,
@@ -201,7 +158,7 @@ def write_outputs(
         write_excel_output(
             workbook,
             worksheet,
-            Path(args.excel_file),
+            excel_file,
             headers,
             header_map,
             evaluations,
@@ -224,10 +181,32 @@ def main() -> int:
     args = build_arg_parser(env).parse_args()
 
     try:
-        validate_args(args)
-        master_prompt = read_text_asset(Path(args.master_prompt), "master prompt")
-        latex_cv = read_text_asset(Path(args.cv), "LaTeX CV")
-        spreadsheet_id = read_google_spreadsheet_id(args.google_sheet_id)
+        excel_file = Path(env.get("JOB_EVAL_EXCEL_FILE", str(DEFAULT_EXCEL_FILE)))
+        master_prompt_file = Path(
+            env.get("JOB_EVAL_MASTER_PROMPT_FILE", str(DEFAULT_MASTER_PROMPT_FILE))
+        )
+        cv_file = Path(env.get("JOB_EVAL_CV_FILE", str(DEFAULT_CV_FILE)))
+        model = env.get("JOB_EVAL_OPENAI_MODEL", DEFAULT_MODEL)
+        batch_size = env.get_int("JOB_EVAL_BATCH_SIZE", 10)
+        concurrency = env.get_int("JOB_EVAL_CONCURRENCY", 2)
+        retries = env.get_int("JOB_EVAL_OPENAI_RETRIES", 3)
+        retry_base_delay = env.get_float("JOB_EVAL_RETRY_BASE_DELAY", 2.0)
+        retry_max_delay = env.get_float("JOB_EVAL_RETRY_MAX_DELAY", 60.0)
+        timeout = env.get_float("JOB_EVAL_OPENAI_TIMEOUT", 120.0)
+        max_output_tokens = env.get_int("JOB_EVAL_MAX_OUTPUT_TOKENS", 9000)
+
+        validate_runtime_settings(
+            batch_size=batch_size,
+            concurrency=concurrency,
+            retries=retries,
+            max_output_tokens=max_output_tokens,
+        )
+
+        master_prompt = read_text_asset(master_prompt_file, "master prompt")
+        latex_cv = read_text_asset(cv_file, "LaTeX CV")
+        spreadsheet_id = read_google_spreadsheet_id(
+            env.get("JOB_EVAL_GOOGLE_SPREADSHEET_ID")
+        )
         source = parse_source(args.source, spreadsheet_id, env)
 
         LOGGER.info("Loading %s input ...", source)
@@ -236,6 +215,7 @@ def main() -> int:
                 args,
                 source,
                 spreadsheet_id,
+                excel_file,
             )
         )
 
@@ -243,9 +223,6 @@ def main() -> int:
         records, skipped_existing = extract_job_records(
             headers,
             rows,
-            start_row=args.start_row,
-            limit=args.limit,
-            reevaluate=args.reevaluate,
         )
 
         LOGGER.info("Sheet: %s", sheet_name)
@@ -256,20 +233,10 @@ def main() -> int:
                 skipped_existing,
             )
 
-        if args.dry_run:
-            for record in records[:5]:
-                LOGGER.info(
-                    "Dry run row %s: %s", record.row_number, record.display_name
-                )
-            LOGGER.info(
-                "Dry run complete. No OpenAI calls were made and nothing was saved."
-            )
-            return 0
-
         if not records:
             LOGGER.info("No rows need evaluation. Writing any missing AI headers only.")
             write_outputs(
-                args,
+                excel_file,
                 source,
                 spreadsheet_id,
                 google_service,
@@ -289,21 +256,21 @@ def main() -> int:
             )
 
         evaluator = OpenAIJobEvaluator(
-            model=args.model,
+            model=model,
             api_key=api_key,
-            timeout=args.timeout,
-            retries=args.retries,
-            base_delay=args.retry_base_delay,
-            max_delay=args.retry_max_delay,
-            max_output_tokens=args.max_output_tokens,
+            timeout=timeout,
+            retries=retries,
+            base_delay=retry_base_delay,
+            max_delay=retry_max_delay,
+            max_output_tokens=max_output_tokens,
         )
         evaluations = evaluate_records(
             records,
             evaluator=evaluator,
             master_prompt=master_prompt,
             latex_cv=latex_cv,
-            concurrency=args.concurrency,
-            batch_size=args.batch_size,
+            concurrency=concurrency,
+            batch_size=batch_size,
         )
 
         LOGGER.info(
@@ -311,7 +278,7 @@ def main() -> int:
             len(evaluations),
         )
         write_outputs(
-            args,
+            excel_file,
             source,
             spreadsheet_id,
             google_service,
@@ -323,9 +290,7 @@ def main() -> int:
             evaluations,
         )
         if source == "excel":
-            LOGGER.info(
-                "Saved Excel workbook: %s (sheet: %s)", args.excel_file, sheet_name
-            )
+            LOGGER.info("Saved Excel workbook: %s (sheet: %s)", excel_file, sheet_name)
         else:
             LOGGER.info(
                 "Updated Google Sheet ID %s (tab: %s)",

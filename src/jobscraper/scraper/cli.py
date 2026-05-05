@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import sys
 import time
 from typing import Any
@@ -24,6 +25,8 @@ from jobscraper.scraper.settings import (
     source_label,
 )
 
+LOGGER = logging.getLogger("jobscraper.scraper")
+
 
 def parse_output_mode(settings: ScraperSettings) -> set[str]:
     """Resolve requested output modes from environment aliases."""
@@ -31,7 +34,10 @@ def parse_output_mode(settings: ScraperSettings) -> set[str]:
     if modes:
         return modes
 
-    print(f"⚠ Unknown OUTPUT_MODE '{settings.output_mode}', using local Excel output.")
+    LOGGER.warning(
+        "Unknown JOBSCRAPER_OUTPUT_MODE %r; using local Excel output.",
+        settings.output_mode,
+    )
     return {"excel"}
 
 
@@ -54,106 +60,137 @@ def sort_key(settings: ScraperSettings, job: dict[str, Any]) -> str:
     return posted if posted != "N/A" else "0000"
 
 
-def main() -> None:
+def configure_logging() -> None:
+    """Configure scraper logging for CLI output."""
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(message)s",
+        datefmt="%H:%M:%S",
+    )
+
+
+def main() -> int:
     """Run the scraper CLI using resolved local settings."""
-    settings = load_scraper_settings()
-    run_started = time.perf_counter()
+    configure_logging()
+    try:
+        settings = load_scraper_settings()
+    except RuntimeError as exc:
+        LOGGER.error("%s", exc)
+        return 1
 
     if not settings.apify_api_token or settings.apify_api_token == TOKEN_PLACEHOLDER:
-        print(
-            f"❌ Please set {TOKEN_ENV_VAR} in {settings.token_file.name} "
-            "or as an environment variable."
+        LOGGER.error(
+            "Please set %s in %s or as an environment variable.",
+            TOKEN_ENV_VAR,
+            settings.token_file.name,
         )
-        print(f"   Add this line to {settings.token_file.name}:")
-        print(f"   {TOKEN_ENV_VAR}={TOKEN_PLACEHOLDER}")
-        return
+        LOGGER.info("Example: %s=%s", TOKEN_ENV_VAR, TOKEN_PLACEHOLDER)
+        return 1
+
+    run_started = time.perf_counter()
 
     job_sources = parse_job_sources(settings)
     search_source, searches = get_searches(settings, job_sources)
     if not searches:
-        print("❌ No searches configured.")
-        print("   Add keywords in the script.")
-        return
+        LOGGER.error("No searches configured. Add keywords to configs/keywords.txt.")
+        return 1
 
     output_modes = parse_output_mode(settings)
     google_sheets_service = None
     if "google_sheets" in output_modes:
-        print("Checking Google Sheets access ...")
+        LOGGER.info("Checking Google Sheets access.")
         try:
             google_sheets_service = build_scraper_google_sheets_service()
-            print("Google Sheets access OK.")
+            LOGGER.info("Google Sheets access is ready.")
         except GoogleSheetsExportError as exc:
-            print(f"\n❌ {exc}")
-            return
+            LOGGER.error("%s", exc)
+            return 1
 
-    print("=" * 60)
-    print(f"  Job Scraper — {settings.run_started_at.strftime('%Y-%m-%d %H:%M %Z')}")
-    print(
-        "  UTC start time: "
-        f"{settings.run_started_at_utc.strftime('%Y-%m-%d %H:%M UTC')}"
+    LOGGER.info(
+        "Job Scraper started at %s.",
+        settings.run_started_at.strftime("%Y-%m-%d %H:%M %Z"),
     )
-    print(f"  Sources: {', '.join(source_label(source) for source in job_sources)}")
+    LOGGER.info(
+        "Sources: %s.", ", ".join(source_label(source) for source in job_sources)
+    )
     if "linkedin" in job_sources:
-        print(f"  LinkedIn actor: {settings.source_actor_ids['linkedin']}")
+        LOGGER.info("LinkedIn actor: %s.", settings.source_actor_ids["linkedin"])
     if "indeed" in job_sources:
-        print(f"  Indeed actor: {settings.source_actor_ids['indeed']}")
-    print(f"  Search source: {search_source}")
-    print(f"  Output mode: {', '.join(sorted(output_modes))}")
-    print(f"  Timezone: {settings.scraper_timezone}")
-    print(f"  Posted timezone: {settings.posted_timezone}")
-    print(f"  Searches: {len(searches)}")
-    print(f"  Search concurrency: {settings.search_concurrency}")
-    print(f"  Max applicants/job: {settings.max_applicants}")
-    print(f"  Apify child run memory: {settings.apify_run_memory_mb} MB")
-    print(f"  Apify child run timeout: {settings.apify_run_timeout_seconds}s")
+        LOGGER.info("Indeed actor: %s.", settings.source_actor_ids["indeed"])
+    LOGGER.info("Search source: %s.", search_source)
+    LOGGER.info("Output mode: %s.", ", ".join(sorted(output_modes)))
+    LOGGER.info("Timezone: %s.", settings.scraper_timezone)
+    LOGGER.info("Posted timezone: %s.", settings.posted_timezone)
+    LOGGER.info("Searches: %s.", len(searches))
+    LOGGER.info("Search concurrency: %s.", settings.search_concurrency)
+    LOGGER.info("Max applicants/job: %s.", settings.max_applicants)
+    LOGGER.info("Apify child run memory: %s MB.", settings.apify_run_memory_mb)
+    LOGGER.info("Apify child run timeout: %ss.", settings.apify_run_timeout_seconds)
     if settings.delay_between_requests:
-        print(f"  Delay between starting searches: {settings.delay_between_requests}s")
+        LOGGER.info(
+            "Delay between starting searches: %ss.",
+            settings.delay_between_requests,
+        )
     if "linkedin" in job_sources:
-        print(f"  LinkedIn job types: {', '.join(settings.contract_types)}")
-        print(f"  LinkedIn experience levels: {', '.join(settings.experience_levels)}")
-        print(f"  LinkedIn max results/search: {settings.max_results_per_search}")
-        print(
-            "  LinkedIn scrape company details: " f"{settings.scrape_company_details}"
+        LOGGER.info("LinkedIn job types: %s.", ", ".join(settings.contract_types))
+        LOGGER.info(
+            "LinkedIn experience levels: %s.",
+            ", ".join(settings.experience_levels),
+        )
+        LOGGER.info("LinkedIn max results/search: %s.", settings.max_results_per_search)
+        LOGGER.info(
+            "LinkedIn scrape company details: %s.",
+            settings.scrape_company_details,
         )
     if "indeed" in job_sources:
-        print(
-            "  Indeed country/location: "
-            f"{settings.indeed_country.upper()} / {settings.indeed_location}"
+        LOGGER.info(
+            "Indeed country/location: %s / %s.",
+            settings.indeed_country.upper(),
+            settings.indeed_location,
         )
-        print(f"  Indeed max results/search: {settings.indeed_max_results_per_search}")
-        print(f"  Indeed max concurrency: {settings.indeed_max_concurrency}")
-        print("  Indeed save unique only: " f"{settings.indeed_save_only_unique_items}")
-    print("=" * 60)
+        LOGGER.info(
+            "Indeed max results/search: %s.",
+            settings.indeed_max_results_per_search,
+        )
+        LOGGER.info("Indeed max concurrency: %s.", settings.indeed_max_concurrency)
+        LOGGER.info(
+            "Indeed save unique only: %s.",
+            settings.indeed_save_only_unique_items,
+        )
 
     all_results, zero_searches, failed_sources, skipped_searches = run_all_searches(
         settings, searches
     )
 
-    print("\n" + "─" * 60)
-    print("Deduplicating results ...")
+    LOGGER.info("Deduplicating results.")
     unique_jobs = merge_and_deduplicate(all_results)
-    print(f"  → {len(unique_jobs)} unique job(s) after deduplication")
+    LOGGER.info("%s unique job(s) after deduplication.", len(unique_jobs))
 
-    print("Applying title filters ...")
+    LOGGER.info("Applying title filters.")
     unique_jobs, excluded_title_count = filter_excluded_titles(settings, unique_jobs)
     terms = ", ".join(settings.excluded_title_terms)
-    print(f"  → Removed {excluded_title_count} job(s) containing: {terms}")
+    LOGGER.info(
+        "Removed %s job(s) containing excluded title terms: %s.",
+        excluded_title_count,
+        terms,
+    )
 
-    print("Applying applicant count filter ...")
+    LOGGER.info("Applying applicant count filter.")
     unique_jobs, excluded_applicant_count = filter_applicant_count(
         settings, unique_jobs
     )
-    print(
-        f"  → Removed {excluded_applicant_count} job(s) with more than "
-        f"{settings.max_applicants} applicant(s)"
+    LOGGER.info(
+        "Removed %s job(s) with more than %s applicant(s).",
+        excluded_applicant_count,
+        settings.max_applicants,
     )
 
-    print("Sorting results ...")
+    LOGGER.info("Sorting results.")
     unique_jobs.sort(key=lambda job: sort_key(settings, job), reverse=True)
 
     outputs = []
     if "excel" in output_modes:
-        print(f"Saving local Excel file '{settings.excel_output_file.name}' ...")
+        LOGGER.info("Saving local Excel file %s.", settings.excel_output_file.name)
         outputs.append(
             (
                 "Excel file",
@@ -162,7 +199,7 @@ def main() -> None:
         )
 
     if "google_sheets" in output_modes:
-        print("Creating Google Sheet ...")
+        LOGGER.info("Creating Google Sheet tab.")
         try:
             spreadsheet_url = export_to_google_sheets(
                 settings,
@@ -170,33 +207,39 @@ def main() -> None:
                 unique_jobs,
             )
         except GoogleSheetsExportError as exc:
-            print(f"\n❌ {exc}")
-            return
+            LOGGER.error("%s", exc)
+            return 1
         outputs.append(("Google Sheet", spreadsheet_url))
 
-    print("\n" + "=" * 60)
-    print(
-        f"  Searched {len(searches)} search URL(s) → "
-        f"Found {len(unique_jobs)} unique job postings."
+    LOGGER.info(
+        "Searched %s search URL(s); found %s unique job posting(s).",
+        len(searches),
+        len(unique_jobs),
     )
-    print(f"  Total runtime: {format_duration(time.perf_counter() - run_started)}")
+    LOGGER.info(
+        "Total runtime: %s.",
+        format_duration(time.perf_counter() - run_started),
+    )
     if excluded_title_count:
-        print(f"  Excluded by title rule: {excluded_title_count}")
+        LOGGER.info("Excluded by title rule: %s.", excluded_title_count)
     if excluded_applicant_count:
-        print(f"  Excluded by applicant count: {excluded_applicant_count}")
+        LOGGER.info("Excluded by applicant count: %s.", excluded_applicant_count)
     if zero_searches:
-        print(f"  Searches with 0 results ({len(zero_searches)}):")
+        LOGGER.info("Searches with 0 results: %s.", len(zero_searches))
         for label in zero_searches:
-            print(f"    • {label}")
+            LOGGER.info("No results: %s.", label)
     if failed_sources:
-        print(f"  Failed source(s) ({len(failed_sources)}):")
+        LOGGER.warning("Failed source(s): %s.", len(failed_sources))
         for source, message in failed_sources.items():
-            print(f"    • {source_label(source)}: {message[:180]}")
+            LOGGER.warning("%s: %s.", source_label(source), message[:180])
     if skipped_searches:
-        print(f"  Skipped searches after source failure: {len(skipped_searches)}")
+        LOGGER.warning(
+            "Skipped searches after source failure: %s.",
+            len(skipped_searches),
+        )
     for label, destination in outputs:
-        print(f"  {label}: {destination}")
-    print("=" * 60)
+        LOGGER.info("%s: %s.", label, destination)
+    return 0
 
 
 if __name__ == "__main__":

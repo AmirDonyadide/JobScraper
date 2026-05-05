@@ -55,9 +55,6 @@ def test_extract_job_records_skips_existing_non_error_verdicts():
     records, skipped = extract_job_records(
         headers,
         [row],
-        start_row=2,
-        limit=None,
-        reevaluate=False,
     )
 
     assert records == []

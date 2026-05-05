@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
@@ -16,6 +17,8 @@ from jobscraper.scraper.settings import (
     ScraperSettings,
     source_label,
 )
+
+LOGGER = logging.getLogger("jobscraper.scraper")
 
 INDEED_DOMAIN_BY_COUNTRY = {
     "us": "www.indeed.com",
@@ -153,9 +156,9 @@ def parse_job_sources(settings: ScraperSettings) -> list[str]:
     """Resolve selected job sources from environment aliases."""
     selected = SOURCE_ALIASES.get(settings.source_mode)
     if not selected:
-        print(
-            f"⚠ Unknown JOBSCRAPER_SOURCES '{settings.source_mode}', "
-            "using LinkedIn only."
+        LOGGER.warning(
+            "Unknown JOBSCRAPER_SOURCES %r; using LinkedIn only.",
+            settings.source_mode,
         )
         selected = {"linkedin"}
 
@@ -230,7 +233,7 @@ def fetch_jobs_for_search(
         jobs = run_actor(settings, search.actor_id, search.payload, search.max_items)
         return annotate_jobs(jobs, search.source, search.source_label)
     except requests.exceptions.Timeout:
-        print(f"  ⚠ Timeout for search '{label}' — skipping.")
+        LOGGER.warning("Timeout for search %r; skipping.", label)
         return []
     except requests.exceptions.ConnectionError as exc:
         raise ApifyConfigurationError(
@@ -242,10 +245,10 @@ def fetch_jobs_for_search(
     except requests.exceptions.HTTPError as exc:
         response = exc.response
         details = f" {apify_error_message(response)}" if response is not None else ""
-        print(f"  ⚠ HTTP error for search '{label}': {exc}.{details} — skipping.")
+        LOGGER.warning("HTTP error for search %r: %s.%s Skipping.", label, exc, details)
         return []
     except Exception as exc:
-        print(f"  ⚠ Unexpected error for search '{label}': {exc} — skipping.")
+        LOGGER.warning("Unexpected error for search %r: %s. Skipping.", label, exc)
         return []
 
 
@@ -263,7 +266,7 @@ def run_all_searches(
     max_workers = min(settings.search_concurrency, len(searches))
     submitted_count = 0
 
-    print(f"\nRunning up to {max_workers} search(es) in parallel ...")
+    LOGGER.info("Running up to %s search(es) in parallel.", max_workers)
 
     def submit_next(
         executor: ThreadPoolExecutor,
@@ -280,10 +283,12 @@ def run_all_searches(
 
             label = search.display_label
             if search.source in failed_sources:
-                print(f"\n[{idx:02d}/{len(searches)}] Search: '{label}'")
-                print(
-                    f"  → Skipped because {search.source_label} failed earlier "
-                    "in this run."
+                LOGGER.info(
+                    "[%02d/%s] Skipping %s because %s failed earlier in this run.",
+                    idx,
+                    len(searches),
+                    label,
+                    search.source_label,
                 )
                 skipped_searches.append(label)
                 continue
@@ -291,8 +296,13 @@ def run_all_searches(
             if settings.delay_between_requests and submitted_count:
                 time.sleep(settings.delay_between_requests)
 
-            print(f"\n[{idx:02d}/{len(searches)}] Search: '{label}'")
-            print(f"  → Calling Apify actor {search.actor_id} ...")
+            LOGGER.info(
+                "[%02d/%s] Searching %s with Apify actor %s.",
+                idx,
+                len(searches),
+                label,
+                search.actor_id,
+            )
             future = executor.submit(fetch_jobs_for_search, settings, search)
             in_flight[future] = (idx, search)
             submitted_count += 1
@@ -312,19 +322,20 @@ def run_all_searches(
                     jobs = future.result()
                 except ApifyConfigurationError as exc:
                     if search.source not in failed_sources:
-                        print(f"\n❌ {exc}")
-                        print(
-                            f"   Continuing with any results from other sources. "
-                            f"Remaining {search.source_label} searches will be skipped."
+                        LOGGER.error("%s", exc)
+                        LOGGER.warning(
+                            "Continuing with other sources. Remaining %s searches "
+                            "will be skipped.",
+                            search.source_label,
                         )
                         failed_sources[search.source] = str(exc)
                     skipped_searches.append(label)
                 else:
                     all_results.append((idx, search.keyword, jobs))
                     if jobs:
-                        print(f"  ✓ Completed '{label}': {len(jobs)} job(s) found")
+                        LOGGER.info("Completed %s: %s job(s) found.", label, len(jobs))
                     else:
-                        print(f"  — Completed '{label}': 0 results")
+                        LOGGER.info("Completed %s: 0 results.", label)
                         zero_searches.append(label)
 
                 submit_next(executor, search_iter, in_flight)
