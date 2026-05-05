@@ -88,8 +88,8 @@ Common settings:
 | `JOBSCRAPER_MAX_RESULTS_PER_SEARCH` | `500` | Maximum LinkedIn results per keyword. |
 | `JOBSCRAPER_POSTED_TIMEZONE` | `Europe/Berlin` | Timezone for the `Posted` column. |
 | `JOB_EVAL_OPENAI_MODEL` | `gpt-5-mini` | OpenAI model used for evaluation. |
-| `JOB_EVAL_CONCURRENCY` | `2` | Number of OpenAI job evaluations run at the same time. |
-| `JOB_EVAL_BATCH_SIZE` | `10` | Number of jobs processed per evaluator batch. |
+| `JOB_EVAL_CONCURRENCY` | `8` | Number of OpenAI job evaluations run at the same time. |
+| `JOB_EVAL_BATCH_SIZE` | `40` | Number of jobs processed per evaluator batch. |
 
 ## Running
 

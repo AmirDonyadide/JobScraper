@@ -49,8 +49,8 @@ jobs:
       JOBSCRAPER_TIMEZONE: Europe/Berlin
       JOBSCRAPER_POSTED_TIMEZONE: Europe/Berlin
       JOB_EVAL_OPENAI_MODEL: "gpt-5-mini"
-      JOB_EVAL_CONCURRENCY: "2"
-      JOB_EVAL_BATCH_SIZE: "10"
+      JOB_EVAL_CONCURRENCY: "8"
+      JOB_EVAL_BATCH_SIZE: "40"
       PYTHONUNBUFFERED: "1"
       TZ: Europe/Berlin
 
