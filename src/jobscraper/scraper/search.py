@@ -1,0 +1,337 @@
+"""Search construction and Apify execution for scraper runs."""
+
+from __future__ import annotations
+
+import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from dataclasses import dataclass
+from typing import Any
+from urllib.parse import urlencode
+
+import requests
+
+from jobscraper.scraper.settings import (
+    SOURCE_ALIASES,
+    SOURCE_ORDER,
+    ScraperSettings,
+    source_label,
+)
+
+INDEED_DOMAIN_BY_COUNTRY = {
+    "us": "www.indeed.com",
+    "gb": "uk.indeed.com",
+    "uk": "uk.indeed.com",
+    "de": "de.indeed.com",
+    "at": "at.indeed.com",
+    "ch": "ch.indeed.com",
+    "fr": "fr.indeed.com",
+    "nl": "nl.indeed.com",
+    "it": "it.indeed.com",
+    "es": "es.indeed.com",
+    "ca": "ca.indeed.com",
+    "au": "au.indeed.com",
+}
+
+
+class ApifyConfigurationError(RuntimeError):
+    """Raised when Apify rejects the token, actor access, or paid actor setup."""
+
+
+@dataclass(frozen=True)
+class SearchRequest:
+    """A single source/keyword search to run through Apify."""
+
+    source: str
+    source_label: str
+    keyword: str
+    display_label: str
+    actor_id: str
+    payload: dict[str, Any]
+    max_items: int
+
+
+def apify_headers(settings: ScraperSettings) -> dict[str, str]:
+    """Build authorization headers for Apify API calls."""
+    return {"Authorization": f"Bearer {settings.apify_api_token}"}
+
+
+def apify_error_message(response: requests.Response) -> str:
+    """Extract a concise user-facing error message from an Apify response."""
+    try:
+        data = response.json()
+    except ValueError:
+        return response.text.strip()[:500] or response.reason
+
+    if isinstance(data, dict):
+        error = data.get("error")
+        if isinstance(error, dict) and error.get("message"):
+            return str(error["message"])
+        if data.get("message"):
+            return str(data["message"])
+
+    return str(data)[:500]
+
+
+def indeed_base_url(settings: ScraperSettings) -> str:
+    """Return the public Indeed base URL for the configured country."""
+    country_key = settings.indeed_country.lower()
+    domain = INDEED_DOMAIN_BY_COUNTRY.get(country_key, f"{country_key}.indeed.com")
+    return f"https://{domain}"
+
+
+def build_linkedin_search_url(settings: ScraperSettings, keyword: str) -> str:
+    """Build a LinkedIn job-search URL for one keyword."""
+    params = {
+        "keywords": keyword,
+        "location": settings.location,
+        "geoId": settings.geo_id,
+        "f_TPR": settings.published_at,
+        "f_E": ",".join(settings.experience_levels),
+        "f_JT": ",".join(settings.contract_types),
+        "position": "1",
+        "pageNum": "0",
+    }
+    return f"https://www.linkedin.com/jobs/search/?{urlencode(params)}"
+
+
+def build_linkedin_actor_input(
+    settings: ScraperSettings, search_url: str
+) -> dict[str, Any]:
+    """Build the Apify actor payload for LinkedIn searches."""
+    payload = {
+        "urls": [search_url],
+        "count": settings.max_results_per_search,
+        "scrapeCompany": settings.scrape_company_details,
+        "useIncognitoMode": settings.use_incognito_mode,
+        "splitByLocation": settings.split_by_location,
+    }
+    if settings.split_by_location:
+        payload["splitCountry"] = settings.split_country
+    return payload
+
+
+def build_indeed_actor_input(settings: ScraperSettings, keyword: str) -> dict[str, Any]:
+    """Build the Apify actor payload for Indeed searches."""
+    return {
+        "country": settings.indeed_country,
+        "location": settings.indeed_location,
+        "maxConcurrency": settings.indeed_max_concurrency,
+        "maxItems": settings.indeed_max_results_per_search,
+        "position": keyword,
+        "saveOnlyUniqueItems": settings.indeed_save_only_unique_items,
+    }
+
+
+def build_actor_input(
+    settings: ScraperSettings, source: str, keyword: str
+) -> dict[str, Any]:
+    """Build a source-specific Apify actor payload."""
+    if source == "linkedin":
+        return build_linkedin_actor_input(
+            settings, build_linkedin_search_url(settings, keyword)
+        )
+    if source == "indeed":
+        return build_indeed_actor_input(settings, keyword)
+    raise ValueError(f"Unknown job source: {source}")
+
+
+def build_search(settings: ScraperSettings, source: str, keyword: str) -> SearchRequest:
+    """Build a typed search request for one source and keyword."""
+    label = source_label(source)
+    return SearchRequest(
+        source=source,
+        source_label=label,
+        keyword=keyword,
+        display_label=f"{label} / {keyword}",
+        actor_id=settings.source_actor_ids[source],
+        payload=build_actor_input(settings, source, keyword),
+        max_items=settings.source_max_items[source],
+    )
+
+
+def parse_job_sources(settings: ScraperSettings) -> list[str]:
+    """Resolve selected job sources from environment aliases."""
+    selected = SOURCE_ALIASES.get(settings.source_mode)
+    if not selected:
+        print(
+            f"⚠ Unknown JOBSCRAPER_SOURCES '{settings.source_mode}', "
+            "using LinkedIn only."
+        )
+        selected = {"linkedin"}
+
+    return [source for source in SOURCE_ORDER if source in selected]
+
+
+def get_searches(
+    settings: ScraperSettings, sources: list[str]
+) -> tuple[str, list[SearchRequest]]:
+    """Build all source/keyword searches for a scraper run."""
+    searches = [
+        build_search(settings, source, keyword)
+        for source in sources
+        if source in settings.source_actor_ids
+        for keyword in settings.keywords
+    ]
+    source_labels = ", ".join(source_label(source) for source in sources)
+    return f"generated {source_labels} keyword URLs", searches
+
+
+def annotate_jobs(
+    jobs: list[dict[str, Any]], source: str, label: str
+) -> list[dict[str, Any]]:
+    """Attach source metadata to raw jobs returned by Apify."""
+    return [dict(job, _source=source, _source_label=label) for job in jobs]
+
+
+def run_actor(
+    settings: ScraperSettings, actor_id: str, payload: dict[str, Any], max_items: int
+) -> list[dict[str, Any]]:
+    """Run a configured Apify actor synchronously and return dataset items."""
+    url = f"https://api.apify.com/v2/acts/{actor_id}/run-sync-get-dataset-items"
+    params = {
+        "timeout": settings.apify_run_timeout_seconds,
+        "memory": settings.apify_run_memory_mb,
+        "maxItems": max_items,
+    }
+
+    response = requests.post(
+        url,
+        params=params,
+        headers=apify_headers(settings),
+        json=payload,
+        timeout=settings.apify_client_timeout_seconds,
+    )
+
+    if response.status_code in (401, 403):
+        message = apify_error_message(response)
+        raise ApifyConfigurationError(
+            "Apify rejected the request. Check that APIFY_API_TOKEN is valid, "
+            f"that your account can run {actor_id}, and that billing/trial "
+            f"access is active. Apify said: {message}"
+        )
+
+    response.raise_for_status()
+    data = response.json()
+
+    if isinstance(data, list):
+        return data
+    if isinstance(data, dict) and "items" in data:
+        items = data["items"]
+        return items if isinstance(items, list) else []
+    return []
+
+
+def fetch_jobs_for_search(
+    settings: ScraperSettings, search: SearchRequest
+) -> list[dict[str, Any]]:
+    """Call Apify for one search and return annotated job dictionaries."""
+    label = search.display_label
+    try:
+        jobs = run_actor(settings, search.actor_id, search.payload, search.max_items)
+        return annotate_jobs(jobs, search.source, search.source_label)
+    except requests.exceptions.Timeout:
+        print(f"  ⚠ Timeout for search '{label}' — skipping.")
+        return []
+    except requests.exceptions.ConnectionError as exc:
+        raise ApifyConfigurationError(
+            f"Could not connect to Apify API while searching '{label}'. "
+            f"Check your internet connection/DNS and try again. Details: {exc}"
+        ) from exc
+    except ApifyConfigurationError:
+        raise
+    except requests.exceptions.HTTPError as exc:
+        response = exc.response
+        details = f" {apify_error_message(response)}" if response is not None else ""
+        print(f"  ⚠ HTTP error for search '{label}': {exc}.{details} — skipping.")
+        return []
+    except Exception as exc:
+        print(f"  ⚠ Unexpected error for search '{label}': {exc} — skipping.")
+        return []
+
+
+def run_all_searches(
+    settings: ScraperSettings,
+    searches: list[SearchRequest],
+) -> tuple[
+    list[tuple[str, list[dict[str, Any]]]], list[str], dict[str, str], list[str]
+]:
+    """Run searches concurrently while preserving the original result order."""
+    all_results: list[tuple[int, str, list[dict[str, Any]]]] = []
+    zero_searches: list[str] = []
+    failed_sources: dict[str, str] = {}
+    skipped_searches: list[str] = []
+    max_workers = min(settings.search_concurrency, len(searches))
+    submitted_count = 0
+
+    print(f"\nRunning up to {max_workers} search(es) in parallel ...")
+
+    def submit_next(
+        executor: ThreadPoolExecutor,
+        search_iter: Any,
+        in_flight: dict[Any, tuple[int, SearchRequest]],
+    ) -> None:
+        """Submit searches until the concurrency window is full."""
+        nonlocal submitted_count
+        while len(in_flight) < max_workers:
+            try:
+                idx, search = next(search_iter)
+            except StopIteration:
+                return
+
+            label = search.display_label
+            if search.source in failed_sources:
+                print(f"\n[{idx:02d}/{len(searches)}] Search: '{label}'")
+                print(
+                    f"  → Skipped because {search.source_label} failed earlier "
+                    "in this run."
+                )
+                skipped_searches.append(label)
+                continue
+
+            if settings.delay_between_requests and submitted_count:
+                time.sleep(settings.delay_between_requests)
+
+            print(f"\n[{idx:02d}/{len(searches)}] Search: '{label}'")
+            print(f"  → Calling Apify actor {search.actor_id} ...")
+            future = executor.submit(fetch_jobs_for_search, settings, search)
+            in_flight[future] = (idx, search)
+            submitted_count += 1
+
+    search_iter = iter(enumerate(searches, start=1))
+
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        in_flight: dict[Any, tuple[int, SearchRequest]] = {}
+        submit_next(executor, search_iter, in_flight)
+
+        while in_flight:
+            for future in as_completed(tuple(in_flight)):
+                idx, search = in_flight.pop(future)
+                label = search.display_label
+
+                try:
+                    jobs = future.result()
+                except ApifyConfigurationError as exc:
+                    if search.source not in failed_sources:
+                        print(f"\n❌ {exc}")
+                        print(
+                            f"   Continuing with any results from other sources. "
+                            f"Remaining {search.source_label} searches will be skipped."
+                        )
+                        failed_sources[search.source] = str(exc)
+                    skipped_searches.append(label)
+                else:
+                    all_results.append((idx, search.keyword, jobs))
+                    if jobs:
+                        print(f"  ✓ Completed '{label}': {len(jobs)} job(s) found")
+                    else:
+                        print(f"  — Completed '{label}': 0 results")
+                        zero_searches.append(label)
+
+                submit_next(executor, search_iter, in_flight)
+                break
+
+    ordered_results = [
+        (keyword, jobs)
+        for _, keyword, jobs in sorted(all_results, key=lambda item: item[0])
+    ]
+    return ordered_results, zero_searches, failed_sources, skipped_searches

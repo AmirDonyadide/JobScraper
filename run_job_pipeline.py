@@ -1,9 +1,9 @@
-"""Compatibility wrapper for the JobScraper CLI.
+"""Compatibility wrapper for the one-step JobScraper pipeline.
 
-The scraper implementation lives in ``src/jobscraper/scraper``. This wrapper
+The pipeline implementation lives in ``src/jobscraper/pipeline``. This wrapper
 preserves the historical command:
 
-    python linkedin_job_scraper.py
+    python run_job_pipeline.py
 """
 
 from __future__ import annotations
@@ -13,7 +13,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "src"))
 
-from jobscraper.scraper.cli import main  # noqa: E402
+from jobscraper.pipeline.cli import main  # noqa: E402
 
 if __name__ == "__main__":
     sys.exit(main())

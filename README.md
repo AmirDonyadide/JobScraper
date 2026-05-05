@@ -1,50 +1,75 @@
 # JobScraper
 
-Scrape recent geo/GIS job postings from Apify-powered LinkedIn and Indeed actors, deduplicate them across keywords, filter unwanted titles and high-applicant jobs, and export each run to Excel, Google Sheets, or both.
+JobScraper scrapes recent geo/GIS job postings from Apify-powered LinkedIn and
+Indeed actors, deduplicates them across keywords, filters unwanted titles and
+high-applicant jobs, and exports each run to Excel, Google Sheets, or both. It
+can also evaluate saved jobs with the OpenAI API and write AI fit results back
+to the same worksheet or Google Sheet tab.
 
-The project is intentionally small: one main scraper, one config-loader helper, user-editable keyword/filter files, dependency files, and an optional GitHub Actions workflow for scheduled runs.
+The repository is intentionally pragmatic: the application code lives in a
+standard `src/` package, editable search settings live in `configs/`, and the
+historical root commands remain as compatibility wrappers.
+
+## Project Structure
+
+```text
+JobScraper/
+├── configs/
+│   ├── filters.json
+│   └── keywords.txt
+├── cv/
+│   └── master_cv.tex
+├── prompts/
+│   └── master_prompt.txt
+├── scripts/
+│   ├── evaluate_jobs.py
+│   ├── run_pipeline.py
+│   └── scrape_jobs.py
+├── src/
+│   └── jobscraper/
+│       ├── config_files.py
+│       ├── env.py
+│       ├── google_sheets.py
+│       ├── paths.py
+│       ├── evaluator/
+│       │   ├── cli.py
+│       │   ├── models.py
+│       │   ├── openai_client.py
+│       │   ├── parsing.py
+│       │   └── storage.py
+│       ├── pipeline/
+│       │   └── cli.py
+│       └── scraper/
+│           ├── cli.py
+│           ├── export_excel.py
+│           ├── export_google_sheets.py
+│           ├── export_rows.py
+│           ├── filters.py
+│           ├── normalize.py
+│           ├── search.py
+│           └── settings.py
+├── tests/
+├── linkedin_job_scraper.py
+├── job_fit_evaluator.py
+├── run_job_pipeline.py
+├── pyproject.toml
+├── requirements.txt
+└── requirements-dev.txt
+```
 
 ## What It Does
 
-1. Builds one search per keyword and selected source.
-2. Runs Apify actors in parallel.
-3. Normalizes fields from LinkedIn and Indeed.
-4. Deduplicates jobs by source and job ID, with a title/company/location fallback.
+1. Builds one Apify search per keyword and selected source.
+2. Runs searches concurrently.
+3. Normalizes fields from LinkedIn and Indeed actor outputs.
+4. Deduplicates by source and job ID, with a title/company/location fallback.
 5. Tracks every keyword that matched each job.
-6. Removes excluded job titles such as `Werkstudent`.
-7. Removes jobs with more than the configured applicant limit.
-8. Saves a new timestamped tab in `jobs.xlsx`, Google Sheets, or both.
+6. Removes excluded titles such as `Werkstudent` or `Working Student`.
+7. Removes jobs above the configured applicant limit.
+8. Writes a timestamped tab to `jobs.xlsx`, Google Sheets, or both.
+9. Optionally evaluates jobs with OpenAI and appends AI result columns.
 
-Default search behavior:
-
-| Setting | Default |
-|---|---|
-| Sources | LinkedIn only |
-| Location | Germany |
-| Posted window | Last 24 hours |
-| LinkedIn experience levels | Internship, Entry level |
-| LinkedIn job types | Full-time, Part-time, Internship |
-| Excluded titles | `Werkstudent`, `Working Student`, `Senior` |
-| Max applicants | `100` |
-
-## Repository Map
-
-| Path | Purpose |
-|---|---|
-| `linkedin_job_scraper.py` | Main scraper and exporters |
-| `job_scraper_config.py` | Loads user-editable config files |
-| `keywords.txt` | Search keywords, one per line |
-| `filters.json` | Search filters, excluded words, applicant limit, and spreadsheet dropdown words |
-| `requirements.txt` | Python dependencies |
-| `requirements-dev.txt` | Runtime dependencies plus local code-check tools |
-| `.env.example` | Copy this to `.env` for local settings |
-| `CONTRIBUTING.md` | Maintainer checklist for safe changes |
-| `.github/workflows/jobs.yml` | Optional daily/manual GitHub Actions run |
-| `jobs.xlsx` | Local output file, generated and ignored by Git |
-| `google_token.json` | Local Google OAuth token, generated and ignored by Git |
-| `google_spreadsheet_id.txt` | Google Sheet ID cache, generated and ignored by Git |
-
-## Quick Start
+## Setup
 
 Use Python 3.11 or newer.
 
@@ -56,195 +81,133 @@ python -m pip install -r requirements.txt
 cp .env.example .env
 ```
 
-Open `.env`, replace the Apify placeholder, then run:
+For local development tools:
 
 ```bash
-python linkedin_job_scraper.py
+python -m pip install -r requirements-dev.txt
 ```
 
-With the default settings, the scraper writes a new sheet tab to `jobs.xlsx`.
-To change what gets searched or filtered, edit `keywords.txt` and `filters.json`.
+## Required Secrets
 
-## Required Setup
-
-### Apify Token
-
-Create an Apify account, copy your personal API token, and put it in `.env`:
+Set secrets in real environment variables or in `.env`. Real environment
+variables take precedence.
 
 ```bash
 APIFY_API_TOKEN=apify_api_XXXXXXXXXXXX
+OPENAI_API_KEY=sk-...
 ```
 
-The script reads real environment variables first and then falls back to `.env`.
-
-### Output Mode
-
-Choose one:
-
-```bash
-JOBSCRAPER_OUTPUT_MODE=excel
-JOBSCRAPER_OUTPUT_MODE=google_sheets
-JOBSCRAPER_OUTPUT_MODE=both
-```
-
-`excel` needs only local dependencies. `google_sheets` and `both` need Google setup.
-
-## Google Sheets Setup
-
-Use this only when `JOBSCRAPER_OUTPUT_MODE` is `google_sheets` or `both`.
-
-1. In Google Cloud, enable the Google Sheets API.
-2. Create an OAuth client for a desktop app.
-3. Download the client JSON.
-4. Save it in this repository as `google_client_secret.json`.
-5. Run the scraper locally once.
-6. Complete the browser-based Google login.
-
-After the first approved run, the script creates `google_token.json`. Future local runs reuse it.
-
-The first Google Sheets export creates a spreadsheet named `jobs` and writes its ID to `google_spreadsheet_id.txt`. Future runs add new tabs to the same spreadsheet. You can also set `GOOGLE_SPREADSHEET_ID` in `.env` to force a specific spreadsheet.
+Google Sheets output also needs `google_client_secret.json` for first local
+OAuth login. After login, `google_token.json` and `google_spreadsheet_id.txt`
+are generated locally and ignored by Git.
 
 ## Configuration
 
-Use `keywords.txt` and `filters.json` for normal search/filter changes. The main Python scraper contains the workflow, so other users should not need to edit it when they only want to change keywords or filtered words.
+Edit these files for normal scraper behavior:
 
-### Editable Config Files
-
-| File | What to Change |
+| Path | Purpose |
 |---|---|
-| `keywords.txt` | Search keywords. Add one keyword per line. Blank lines and lines starting with `#` are ignored. |
-| `filters.json` | LinkedIn location/search values, excluded title terms, maximum applicant count, and spreadsheet status dropdown words. |
+| `configs/keywords.txt` | Search keywords, one per line. Blank lines and comments are ignored. |
+| `configs/filters.json` | LinkedIn search filters, title exclusions, applicant limit, and spreadsheet dropdown values. |
+| `.env` | Secrets, runtime overrides, output mode, sources, and concurrency settings. |
+| `prompts/master_prompt.txt` | Master prompt used by the evaluator. |
+| `cv/master_cv.tex` | Master LaTeX CV included in evaluator prompts. |
 
-`filters.json` sections:
-
-| Section | Purpose |
-|---|---|
-| `linkedin_search` | LinkedIn URL filters such as `location`, `geo_id`, `published_at`, `experience_levels`, and `contract_types` |
-| `final_filters` | Final result filters such as `excluded_title_terms` and `max_applicants`. Title terms are matched case-insensitively and ignore spaces, hyphens, and punctuation. |
-| `spreadsheet` | Spreadsheet dropdown words such as `application_status_options` |
-
-For example, an excluded title term of `Work Student` also removes titles containing `workstudent`, `Workstudent`, or `WORK-STUDENT`.
-
-Use `.env` for secrets, output mode, source selection, and runtime settings.
-
-### Common `.env` Settings
+Common `.env` settings:
 
 | Name | Default | Description |
 |---|---:|---|
-| `APIFY_API_TOKEN` | required | Apify API token |
 | `JOBSCRAPER_OUTPUT_MODE` | `excel` | `excel`, `google_sheets`, or `both` |
 | `JOBSCRAPER_SOURCES` | `linkedin` | `linkedin`, `indeed`, or `both` |
 | `JOBSCRAPER_SEARCH_CONCURRENCY` | `15` | Number of keyword searches started in parallel |
 | `JOBSCRAPER_MAX_RESULTS_PER_SEARCH` | `500` | LinkedIn result cap per keyword |
-| `APIFY_RUN_MEMORY_MB` | `512` | Memory assigned to each Apify actor run |
-| `APIFY_RUN_TIMEOUT_SECONDS` | `300` | Apify actor timeout per search |
-| `APIFY_CLIENT_TIMEOUT_SECONDS` | `360` | Local HTTP timeout for Apify API calls |
-| `JOBSCRAPER_DELAY_BETWEEN_REQUESTS` | `0` | Delay between starting keyword searches |
-| `JOBSCRAPER_SCRAPE_COMPANY_DETAILS` | `false` | Ask LinkedIn actor for extra company details |
-| `JOBSCRAPER_USE_INCOGNITO_MODE` | `true` | LinkedIn actor incognito mode |
-| `JOBSCRAPER_SPLIT_BY_LOCATION` | `false` | LinkedIn actor split-by-location mode |
-| `JOBSCRAPER_TIMEZONE` | `Europe/Rome` | Terminal logs and output tab names |
+| `JOBSCRAPER_MAX_APPLICANTS` | `filters.json` value | Optional env override for applicant filtering |
+| `JOBSCRAPER_TIMEZONE` | `Europe/Rome` | Log and output tab timezone |
 | `JOBSCRAPER_POSTED_TIMEZONE` | `Europe/Berlin` | `Posted` column timezone |
 | `GOOGLE_SPREADSHEET_ID` | blank | Optional existing Google Sheet ID |
 
-### Indeed `.env` Settings
+## Usage
 
-These apply when `JOBSCRAPER_SOURCES` is `indeed` or `both`.
-
-| Name | Default | Description |
-|---|---:|---|
-| `INDEED_COUNTRY` | `DE` | Indeed country code |
-| `INDEED_LOCATION` | `Germany` | Indeed location query |
-| `INDEED_MAX_RESULTS_PER_SEARCH` | `500` | Indeed result cap per keyword |
-| `INDEED_MAX_CONCURRENCY` | `5` | Actor-level Indeed concurrency |
-| `INDEED_SAVE_ONLY_UNIQUE_ITEMS` | `true` | Ask actor to keep unique results only |
-
-### Advanced Overrides
-
-`filters.json` is the preferred place to change `max_applicants`. For automation, `JOBSCRAPER_MAX_APPLICANTS` can still be set as an environment variable to override that one value.
-
-## Running
-
-### One-Off Local Run
+The original commands still work:
 
 ```bash
 python linkedin_job_scraper.py
+python job_fit_evaluator.py --source excel --excel-file jobs.xlsx --sheet latest
+python run_job_pipeline.py --limit 3
 ```
 
-### Run Both Sources Once
+The same commands are also available from `scripts/`:
 
 ```bash
-JOBSCRAPER_SOURCES=both python linkedin_job_scraper.py
+python scripts/scrape_jobs.py
+python scripts/evaluate_jobs.py --source google_sheets --sheet latest
+python scripts/run_pipeline.py --sources both --limit 3
 ```
 
-### Local Cron Example
+If the project is installed as a package, console entry points are available:
 
 ```bash
-crontab -e
+jobscraper-scrape
+jobscraper-evaluate --source excel --excel-file jobs.xlsx --sheet latest
+jobscraper-pipeline --sources linkedin --limit 3
 ```
-
-Run daily at 08:00:
-
-```cron
-0 8 * * * cd /path/to/JobScraper && /path/to/JobScraper/.venv/bin/python linkedin_job_scraper.py
-```
-
-## GitHub Actions
-
-The workflow in `.github/workflows/jobs.yml` can run manually or once daily during the 07:00 UTC hour. It exports to Google Sheets.
-
-Required repository secrets:
-
-| Secret | Purpose |
-|---|---|
-| `APIFY_API_TOKEN` | Apify token |
-| `GOOGLE_TOKEN_JSON` | Contents of a locally generated `google_token.json` |
-| `GOOGLE_SPREADSHEET_ID` | Target Google spreadsheet ID |
-
-Recommended setup:
-
-1. Configure Google Sheets locally first.
-2. Confirm a local `google_sheets` run works.
-3. Copy the contents of `google_token.json` into the GitHub secret `GOOGLE_TOKEN_JSON`.
-4. Copy the target spreadsheet ID into `GOOGLE_SPREADSHEET_ID`.
-5. Add `APIFY_API_TOKEN`.
-6. Run the workflow manually from the Actions tab.
-
-GitHub-hosted runners are temporary, so they cannot complete browser-based Google OAuth during a workflow run. That is why `GOOGLE_TOKEN_JSON` must come from a local first-time login.
 
 ## Output Columns
 
+Scraper exports keep the existing output schema:
+
 | Column | Description |
 |---|---|
-| Application Status | Empty Excel cell or Google Sheets dropdown: applied, rejected, interview, accepted |
-| App | Source app, such as LinkedIn or Indeed |
-| Job Title | Position name |
-| Company | Employer name |
-| Location | City or region |
-| Job Type | Text from the job source |
-| Posted | Date and time in `JOBSCRAPER_POSTED_TIMEZONE` |
-| Applicants | Applicant count if visible |
-| Keywords Matched | All keywords that returned this job |
-| Job URL | Clickable link to the job posting |
-| Apply URL | Clickable external application link if available |
+| `Application Status` | Empty Excel cell or Google Sheets dropdown |
+| `App` | Source app, such as LinkedIn or Indeed |
+| `Job Title` | Position name |
+| `Company` | Employer name |
+| `Location` | City or region |
+| `Job Type` | Source employment type text |
+| `Job Description` | Plain-text job description when returned by the source; removed after evaluator runs |
+| `Posted` | Date/time in `JOBSCRAPER_POSTED_TIMEZONE` |
+| `Applicants` | Applicant count text if visible |
+| `Keywords Matched` | All keywords that returned the job |
+| `Job URL` | Clickable job posting link |
+| `Apply URL` | Clickable external application link when available |
+
+Evaluator output columns are appended only when missing. After evaluation, the
+evaluator keeps only:
+
+`AI Verdict`, `AI Fit Score`, and `AI Tailored CV`.
+
+It also deletes legacy AI metadata columns such as `AI Category`, `AI Reason`,
+`AI Raw Verdict`, `AI Evaluated At`, `AI Model`, and `AI Error`, plus the job
+description/details column used to build the prompt.
+
+## Development
+
+Run the test and quality checks:
+
+```bash
+python -m pytest
+python -m black .
+python -m ruff check .
+```
+
+The main structural decisions are:
+
+- `src/jobscraper/scraper/` separates Apify search execution, normalization,
+  filtering, row construction, and exporters.
+- `src/jobscraper/evaluator/` separates row parsing, OpenAI calls, result
+  models, and storage adapters.
+- `src/jobscraper/env.py`, `config_files.py`, and `google_sheets.py` contain
+  reusable infrastructure shared by scraper, evaluator, and pipeline commands.
+- Root scripts are compatibility shims so existing manual runs, cron jobs, and
+  GitHub Actions commands do not need to change.
 
 ## Troubleshooting
 
 | Problem | What to Check |
 |---|---|
-| `Please set APIFY_API_TOKEN` | `.env` exists and `APIFY_API_TOKEN` is not the placeholder |
-| Apify returns `401` or `403` | Token is valid, account can run the actor, billing or trial access is active |
-| Many timeouts | Lower `JOBSCRAPER_SEARCH_CONCURRENCY`, increase `APIFY_RUN_TIMEOUT_SECONDS`, or increase `APIFY_CLIENT_TIMEOUT_SECONDS` |
-| Google credential error | `google_client_secret.json` exists locally, or GitHub has `GOOGLE_TOKEN_JSON` |
-| Spreadsheet not found | Check `GOOGLE_SPREADSHEET_ID` or delete local `google_spreadsheet_id.txt` to create a new `jobs` spreadsheet |
-| `tzdata` or timezone error | Install dependencies from `requirements.txt` and use valid IANA timezones |
-| Missing or invalid config file | Check `keywords.txt` and `filters.json` |
-| Empty or low results | Check source filters, Apify actor health, posted-time window, title exclusions, and applicant-count exclusions |
-
-## Notes For Maintainers
-
-- Do not commit `.env`, Google credential files, generated workbooks, or token files.
-- Keep `.env.example` in sync when adding environment settings.
-- Keep output columns stable unless downstream users are ready for the change.
-- The scraper intentionally uses simple local files instead of a database.
-- Apify actors may cost money per result or run; review actor pricing before raising limits.
+| `Please set APIFY_API_TOKEN` | `.env` exists and the token is not the placeholder |
+| Apify `401` or `403` | Token validity, actor access, billing, or trial status |
+| Many timeouts | Lower `JOBSCRAPER_SEARCH_CONCURRENCY` or increase Apify timeout settings |
+| Google credential error | `google_client_secret.json` exists locally or GitHub has `GOOGLE_TOKEN_JSON` |
+| Spreadsheet not found | Check `GOOGLE_SPREADSHEET_ID` or delete `google_spreadsheet_id.txt` to create a new spreadsheet |
+| Missing config file | Check `configs/keywords.txt` and `configs/filters.json` |
