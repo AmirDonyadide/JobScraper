@@ -8,7 +8,7 @@ The simplest production workflow is the GitHub Actions workflow. After setup, yo
 
 1. Reads your private keywords from `configs/keywords.txt` or GitHub secrets.
 2. Scrapes matching jobs from LinkedIn, Indeed, or both through Apify.
-3. Deduplicates jobs across keywords.
+3. Deduplicates jobs across keywords and previous Google Sheet run tabs.
 4. Removes excluded titles and jobs above the applicant limit.
 5. Writes a new dated tab to Google Sheets.
 6. Evaluates every unevaluated job with OpenAI.
@@ -118,6 +118,8 @@ Common settings:
 | `JOBSCRAPER_OUTPUT_MODE` | `excel` | Use `excel`, `google_sheets`, or `both`. The full pipeline forces Google Sheets. |
 | `JOBSCRAPER_SEARCH_CONCURRENCY` | `15` | Number of Apify searches run at the same time. |
 | `JOBSCRAPER_MAX_RESULTS_PER_SEARCH` | `500` | Maximum LinkedIn results per keyword. |
+| `JOBSCRAPER_SEARCH_WINDOW_BUFFER_SECONDS` | `3600` | Extra search-window padding before exact posted-time filtering, to avoid missing jobs while the run is starting. |
+| `JOBSCRAPER_TIMEZONE` | `Europe/Berlin` | Timezone for terminal logs and new Excel/Google Sheets tab names. |
 | `JOBSCRAPER_POSTED_TIMEZONE` | `Europe/Berlin` | Timezone for the `Posted` column. |
 | `JOB_EVAL_OPENAI_MODEL` | `gpt-5-mini` | OpenAI model used for evaluation. |
 | `JOB_EVAL_CONCURRENCY` | `8` | Number of OpenAI job evaluations run at the same time. |
@@ -314,6 +316,12 @@ If you see OpenAI rate-limit or retry warnings, reduce them in `.github/workflow
 JOB_EVAL_CONCURRENCY: "5"
 JOB_EVAL_BATCH_SIZE: "20"
 ```
+
+## Run Windows And Duplicates
+
+When Google Sheets output is enabled, JobFinder reads the existing timestamped tabs before scraping. The newest previous tab name is treated as the previous exact run time in `JOBSCRAPER_TIMEZONE`, which defaults to `Europe/Berlin`.
+
+LinkedIn searches then use a dynamic posted window from that previous run to the current run, plus `JOBSCRAPER_SEARCH_WINDOW_BUFFER_SECONDS` as safety padding. After scraping, JobFinder filters rows back to the exact previous-run/current-run posted interval, then removes jobs already present in older tabs before the evaluator runs.
 
 ## Running Locally
 

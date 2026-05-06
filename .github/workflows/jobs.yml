@@ -42,6 +42,7 @@ jobs:
       JOBSCRAPER_OUTPUT_MODE: "google_sheets"
       JOBSCRAPER_SOURCES: ${{ github.event.inputs.sources || 'linkedin' }}
       JOBSCRAPER_SEARCH_CONCURRENCY: "15"
+      JOBSCRAPER_SEARCH_WINDOW_BUFFER_SECONDS: "3600"
       APIFY_RUN_MEMORY_MB: "512"
       APIFY_RUN_TIMEOUT_SECONDS: "300"
       JOBSCRAPER_DELAY_BETWEEN_REQUESTS: "0"
@@ -174,6 +175,7 @@ jobs:
           echo "Scraper timezone: ${JOBSCRAPER_TIMEZONE}"
           echo "Posted timezone: ${JOBSCRAPER_POSTED_TIMEZONE}"
           echo "Search concurrency: ${JOBSCRAPER_SEARCH_CONCURRENCY}"
+          echo "Search window buffer: ${JOBSCRAPER_SEARCH_WINDOW_BUFFER_SECONDS}s"
           echo "Apify child run memory: ${APIFY_RUN_MEMORY_MB} MB"
           echo "Evaluator model: ${JOB_EVAL_OPENAI_MODEL}"
           echo "Evaluator concurrency: ${JOB_EVAL_CONCURRENCY}"

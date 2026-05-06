@@ -83,6 +83,7 @@ class ScraperSettings:
     apify_run_timeout_seconds: int
     apify_client_timeout_seconds: int
     delay_between_requests: int
+    search_window_buffer_seconds: int
     location: str
     geo_id: str
     published_at: str
@@ -122,7 +123,7 @@ def load_scraper_settings(env: EnvSettings | None = None) -> ScraperSettings:
     except ConfigFileError as exc:
         raise RuntimeError(f"Configuration error: {exc}") from exc
 
-    scraper_timezone = env.get("JOBSCRAPER_TIMEZONE", "Europe/Rome")
+    scraper_timezone = env.get("JOBSCRAPER_TIMEZONE", "Europe/Berlin")
     posted_timezone = env.get("JOBSCRAPER_POSTED_TIMEZONE", "Europe/Berlin")
     scraper_tz = load_timezone(scraper_timezone, "JOBSCRAPER_TIMEZONE")
     posted_tz = load_timezone(posted_timezone, "JOBSCRAPER_POSTED_TIMEZONE")
@@ -171,6 +172,9 @@ def load_scraper_settings(env: EnvSettings | None = None) -> ScraperSettings:
         apify_client_timeout_seconds=apify_client_timeout_seconds,
         delay_between_requests=max(
             0, env.get_int("JOBSCRAPER_DELAY_BETWEEN_REQUESTS", 0)
+        ),
+        search_window_buffer_seconds=max(
+            0, env.get_int("JOBSCRAPER_SEARCH_WINDOW_BUFFER_SECONDS", 3600)
         ),
         location=location,
         geo_id=config_str(filter_config, "linkedin_search", "geo_id", "101282230"),

@@ -48,6 +48,17 @@ DESCRIPTION_KEYS = (
     "summary",
     "snippet",
 )
+POSTED_KEYS = (
+    "postedAt",
+    "posted_at",
+    "publishedAt",
+    "published_at",
+    "datePosted",
+    "date_posted",
+    "posted",
+    "listedAt",
+    "listed_at",
+)
 
 APPLICANT_NUMBER_RE = re.compile(
     r"(?P<number>\d[\d,.]*)\s*(?P<unit>k)?\s*(?P<plus>\+)?",
@@ -183,19 +194,8 @@ def get_job_url(settings: ScraperSettings, job: dict[str, Any]) -> str:
 
 def get_posted(settings: ScraperSettings, job: dict[str, Any]) -> str:
     """Return the posted timestamp as a formatted local string when possible."""
-    posted_keys = (
-        "postedAt",
-        "posted_at",
-        "publishedAt",
-        "published_at",
-        "datePosted",
-        "date_posted",
-        "posted",
-        "listedAt",
-        "listed_at",
-    )
     fallback = ""
-    for key in posted_keys:
+    for key in POSTED_KEYS:
         value = job.get(key)
         if value and str(value).strip():
             posted_at = parse_datetime_value(settings, value)
@@ -211,6 +211,19 @@ def get_posted(settings: ScraperSettings, job: dict[str, Any]) -> str:
     if fallback:
         return fallback
     return format_posted_value(settings, pub_date)
+
+
+def get_posted_datetime(
+    settings: ScraperSettings, job: dict[str, Any]
+) -> datetime | None:
+    """Return a parsed posted timestamp when the raw job includes one."""
+    for key in POSTED_KEYS:
+        value = job.get(key)
+        if value and str(value).strip():
+            posted_at = parse_datetime_value(settings, value)
+            if posted_at:
+                return posted_at
+    return parse_datetime_value(settings, job.get("pubDate"))
 
 
 def get_job_type(job: dict[str, Any]) -> str:

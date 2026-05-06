@@ -15,6 +15,13 @@ from jobscraper.scraper.export_google_sheets import (
 )
 from jobscraper.scraper.filters import filter_applicant_count, filter_excluded_titles
 from jobscraper.scraper.normalize import get_posted, merge_and_deduplicate
+from jobscraper.scraper.run_history import (
+    GoogleSpreadsheetContext,
+    apply_previous_run_search_window,
+    filter_jobs_to_previous_run_window,
+    load_google_spreadsheet_context,
+    remove_jobs_seen_in_history,
+)
 from jobscraper.scraper.search import get_searches, parse_job_sources, run_all_searches
 from jobscraper.scraper.settings import (
     OUTPUT_MODE_ALIASES,
@@ -89,22 +96,32 @@ def main() -> int:
 
     run_started = time.perf_counter()
 
+    output_modes = parse_output_mode(settings)
+    google_sheets_service = None
+    google_context = GoogleSpreadsheetContext("", "", [], None, set())
+    if "google_sheets" in output_modes:
+        LOGGER.info("Checking Google Sheets access.")
+        try:
+            google_sheets_service = build_scraper_google_sheets_service()
+            google_context = load_google_spreadsheet_context(
+                settings,
+                google_sheets_service,
+            )
+            LOGGER.info("Google Sheets access is ready.")
+        except GoogleSheetsExportError as exc:
+            LOGGER.error("%s", exc)
+            return 1
+
+    settings, linkedin_window_seconds = apply_previous_run_search_window(
+        settings,
+        google_context.previous_run_started_at,
+    )
+
     job_sources = parse_job_sources(settings)
     search_source, searches = get_searches(settings, job_sources)
     if not searches:
         LOGGER.error("No searches configured. Add keywords to configs/keywords.txt.")
         return 1
-
-    output_modes = parse_output_mode(settings)
-    google_sheets_service = None
-    if "google_sheets" in output_modes:
-        LOGGER.info("Checking Google Sheets access.")
-        try:
-            google_sheets_service = build_scraper_google_sheets_service()
-            LOGGER.info("Google Sheets access is ready.")
-        except GoogleSheetsExportError as exc:
-            LOGGER.error("%s", exc)
-            return 1
 
     LOGGER.info(
         "Job Scraper started at %s.",
@@ -121,6 +138,16 @@ def main() -> int:
     LOGGER.info("Output mode: %s.", ", ".join(sorted(output_modes)))
     LOGGER.info("Timezone: %s.", settings.scraper_timezone)
     LOGGER.info("Posted timezone: %s.", settings.posted_timezone)
+    if google_context.previous_run_started_at:
+        LOGGER.info(
+            "Previous Google Sheets run: %s.",
+            google_context.previous_run_started_at.strftime("%Y-%m-%d %H:%M:%S %Z"),
+        )
+    if linkedin_window_seconds and "linkedin" in job_sources:
+        LOGGER.info(
+            "LinkedIn posted search window: %s second(s).",
+            linkedin_window_seconds,
+        )
     LOGGER.info("Searches: %s.", len(searches))
     LOGGER.info("Search concurrency: %s.", settings.search_concurrency)
     LOGGER.info("Max applicants/job: %s.", settings.max_applicants)
@@ -185,6 +212,42 @@ def main() -> int:
         settings.max_applicants,
     )
 
+    if google_context.previous_run_started_at:
+        LOGGER.info("Filtering jobs to the exact previous-run posted window.")
+        unique_jobs, outside_window_count, unknown_posted_count = (
+            filter_jobs_to_previous_run_window(
+                settings,
+                unique_jobs,
+                google_context.previous_run_started_at,
+            )
+        )
+        LOGGER.info(
+            "Removed %s job(s) outside the previous-run posted window.",
+            outside_window_count,
+        )
+        if unknown_posted_count:
+            LOGGER.info(
+                "Kept %s job(s) with no parseable posted timestamp.",
+                unknown_posted_count,
+            )
+    else:
+        outside_window_count = 0
+        unknown_posted_count = 0
+
+    if google_context.historical_job_keys:
+        LOGGER.info("Removing jobs already present in previous Google Sheet tabs.")
+        unique_jobs, historical_duplicate_count = remove_jobs_seen_in_history(
+            settings,
+            unique_jobs,
+            google_context.historical_job_keys,
+        )
+        LOGGER.info(
+            "Removed %s duplicate job(s) already present in the spreadsheet.",
+            historical_duplicate_count,
+        )
+    else:
+        historical_duplicate_count = 0
+
     LOGGER.info("Sorting results.")
     unique_jobs.sort(key=lambda job: sort_key(settings, job), reverse=True)
 
@@ -224,6 +287,13 @@ def main() -> int:
         LOGGER.info("Excluded by title rule: %s.", excluded_title_count)
     if excluded_applicant_count:
         LOGGER.info("Excluded by applicant count: %s.", excluded_applicant_count)
+    if outside_window_count:
+        LOGGER.info("Excluded by previous-run posted window: %s.", outside_window_count)
+    if historical_duplicate_count:
+        LOGGER.info(
+            "Excluded because already present in Google Sheets: %s.",
+            historical_duplicate_count,
+        )
     if zero_searches:
         LOGGER.info("Searches with 0 results: %s.", len(zero_searches))
         for label in zero_searches:
