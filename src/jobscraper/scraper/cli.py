@@ -13,7 +13,11 @@ from jobscraper.scraper.export_google_sheets import (
     build_scraper_google_sheets_service,
     export_to_google_sheets,
 )
-from jobscraper.scraper.filters import filter_applicant_count, filter_excluded_titles
+from jobscraper.scraper.filters import (
+    filter_applicant_count,
+    filter_excluded_companies,
+    filter_excluded_titles,
+)
 from jobscraper.scraper.normalize import get_posted, merge_and_deduplicate
 from jobscraper.scraper.run_history import (
     GoogleSpreadsheetContext,
@@ -202,6 +206,18 @@ def main() -> int:
         terms,
     )
 
+    LOGGER.info("Applying company filters.")
+    unique_jobs, excluded_company_count = filter_excluded_companies(
+        settings,
+        unique_jobs,
+    )
+    company_terms = ", ".join(settings.excluded_company_terms)
+    LOGGER.info(
+        "Removed %s job(s) matching excluded company terms: %s.",
+        excluded_company_count,
+        company_terms,
+    )
+
     LOGGER.info("Applying applicant count filter.")
     unique_jobs, excluded_applicant_count = filter_applicant_count(
         settings, unique_jobs
@@ -285,6 +301,8 @@ def main() -> int:
     )
     if excluded_title_count:
         LOGGER.info("Excluded by title rule: %s.", excluded_title_count)
+    if excluded_company_count:
+        LOGGER.info("Excluded by company rule: %s.", excluded_company_count)
     if excluded_applicant_count:
         LOGGER.info("Excluded by applicant count: %s.", excluded_applicant_count)
     if outside_window_count:

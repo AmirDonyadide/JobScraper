@@ -54,6 +54,7 @@ def make_settings(run_started_at: datetime) -> ScraperSettings:
         split_by_location=False,
         split_country="DE",
         excluded_title_terms=[],
+        excluded_company_terms=[],
         max_applicants=100,
         application_status_options=["applied"],
         indeed_country="DE",

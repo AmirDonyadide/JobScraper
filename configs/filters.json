@@ -26,6 +26,19 @@
       "Student",
       "Studentische"
     ],
+    "excluded_company_terms": [
+      "Zeiss",
+      "Airbus",
+      "Airbus Aircraft",
+      "Boston Consulting Group",
+      "BCG",
+      "IBM",
+      "Fraunhofer",
+      "German Aerospace Center",
+      "DLR",
+      "Siemens",
+      "Tesla"
+    ],
     "max_applicants": 100
   },
   "spreadsheet": {

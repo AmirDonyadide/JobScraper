@@ -96,6 +96,7 @@ cp cv/master_cv.example.tex cv/master_cv.tex
 Then edit:
 
 - `configs/keywords.txt`: one search keyword per line
+- `configs/filters.json`: search settings, title/company exclusions, and applicant cap
 - `prompts/master_prompt.txt`: your evaluator instructions
 - `cv/master_cv.tex`: your private LaTeX CV
 
@@ -322,6 +323,8 @@ JOB_EVAL_BATCH_SIZE: "20"
 When Google Sheets output is enabled, JobFinder reads the existing timestamped tabs before scraping. The newest previous tab name is treated as the previous exact run time in `JOBSCRAPER_TIMEZONE`, which defaults to `Europe/Berlin`.
 
 LinkedIn searches then use a dynamic posted window from that previous run to the current run, plus `JOBSCRAPER_SEARCH_WINDOW_BUFFER_SECONDS` as safety padding. After scraping, JobFinder filters rows back to the exact previous-run/current-run posted interval, then removes jobs already present in older tabs before the evaluator runs.
+
+Final scraper filters in `configs/filters.json` also remove jobs whose company names contain any `excluded_company_terms`, ignoring case and punctuation.
 
 ## Running Locally
 

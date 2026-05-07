@@ -56,6 +56,20 @@ OUTPUT_MODE_ALIASES = {
     "all": {"excel", "google_sheets"},
 }
 
+DEFAULT_EXCLUDED_COMPANY_TERMS = [
+    "Zeiss",
+    "Airbus",
+    "Airbus Aircraft",
+    "Boston Consulting Group",
+    "BCG",
+    "IBM",
+    "Fraunhofer",
+    "German Aerospace Center",
+    "DLR",
+    "Siemens",
+    "Tesla",
+]
+
 
 @dataclass(frozen=True)
 class ScraperSettings:
@@ -94,6 +108,7 @@ class ScraperSettings:
     split_by_location: bool
     split_country: str
     excluded_title_terms: list[str]
+    excluded_company_terms: list[str]
     max_applicants: int
     application_status_options: list[str]
     indeed_country: str
@@ -198,6 +213,12 @@ def load_scraper_settings(env: EnvSettings | None = None) -> ScraperSettings:
             "final_filters",
             "excluded_title_terms",
             ["Werkstudent", "Working Student", "Senior"],
+        ),
+        excluded_company_terms=config_list(
+            filter_config,
+            "final_filters",
+            "excluded_company_terms",
+            DEFAULT_EXCLUDED_COMPANY_TERMS,
         ),
         max_applicants=max(
             0, env.get_int("JOBSCRAPER_MAX_APPLICANTS", config_max_applicants)
