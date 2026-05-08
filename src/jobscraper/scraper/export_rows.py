@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from jobscraper.evaluator.models import OUTPUT_COLUMNS
 from jobscraper.scraper.normalize import (
     get_applicants,
     get_apply_url,
@@ -31,6 +32,7 @@ HEADER = [
     "Keywords Matched",
     "Job URL",
     "Apply URL",
+    *OUTPUT_COLUMNS,
 ]
 """Stable output columns written by scraper exports."""
 
@@ -69,6 +71,7 @@ def make_job_rows(
                 ", ".join(job.get("keywords_matched", [])),
                 hyperlink_formula(job_url, "Open Job"),
                 hyperlink_formula(apply_url, "Open Apply"),
+                *[""] * len(OUTPUT_COLUMNS),
             ]
         )
     return rows

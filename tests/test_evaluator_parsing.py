@@ -28,6 +28,7 @@ def test_row_to_job_advertisement_omits_operational_columns():
         "Applicants",
         "Job URL",
         "AI Verdict",
+        "AI Unsuitable Reasons",
         "AI Reason",
         "Company",
     ]
@@ -36,6 +37,7 @@ def test_row_to_job_advertisement_omits_operational_columns():
         "90",
         "https://example.com",
         "Suitable",
+        "Too senior",
         "Old reason",
         "Acme",
     ]
@@ -80,6 +82,28 @@ Customized CV (LaTeX):
     assert result.fit_score == 88
     assert result.reason == "Strong GIS/Python match."
     assert result.tailored_cv == r"\section{Experience}"
+    assert result.value_for_column("AI Unsuitable Reasons") == ""
+
+
+def test_parse_model_response_extracts_unsuitable_reasons_for_rejected_jobs():
+    """Not-suitable rows should expose rejection reasons in the dedicated column."""
+    response = """Verdict: Not Suitable
+Fit Score: 28%
+Unsuitable Reasons: Requires fluent German and senior cloud architecture experience.
+"""
+
+    result = parse_model_response(response, row_number=8, model="test-model")
+
+    assert result.verdict == "Not Suitable"
+    assert result.reason == (
+        "Requires fluent German and senior cloud architecture experience."
+    )
+    assert result.unsuitable_reasons == (
+        "Requires fluent German and senior cloud architecture experience."
+    )
+    assert result.value_for_column("AI Unsuitable Reasons") == (
+        "Requires fluent German and senior cloud architecture experience."
+    )
 
 
 def test_columns_to_remove_after_evaluation_targets_details_and_old_ai_columns():
@@ -89,10 +113,11 @@ def test_columns_to_remove_after_evaluation_targets_details_and_old_ai_columns()
         "Job Description",
         "AI Verdict",
         "AI Fit Score",
+        "AI Unsuitable Reasons",
         "AI Category",
         "AI Reason",
         "AI Tailored CV",
         "AI Error",
     ]
 
-    assert columns_to_remove_after_evaluation(headers) == [1, 4, 5, 7]
+    assert columns_to_remove_after_evaluation(headers) == [1, 5, 6, 8]

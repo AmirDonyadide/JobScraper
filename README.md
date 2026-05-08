@@ -15,6 +15,7 @@ The simplest production workflow is the GitHub Actions workflow. After setup, yo
 7. Keeps only the final AI columns:
    - `AI Verdict`
    - `AI Fit Score`
+   - `AI Unsuitable Reasons`
    - `AI Tailored CV`
 8. Removes the long job-description/details column after evaluation.
 
@@ -370,11 +371,16 @@ Scraper output columns before evaluation:
 | `Keywords Matched` | Keywords that returned the job. |
 | `Job URL` | Link to the job posting. |
 | `Apply URL` | External application link when available. |
+| `AI Verdict` | Empty until evaluation fills the fit verdict. |
+| `AI Fit Score` | Empty until evaluation fills the fit percentage. |
+| `AI Unsuitable Reasons` | Empty until evaluation explains rows marked `Not Suitable`. |
+| `AI Tailored CV` | Empty until evaluation writes suitable-role CV content. |
 
 Final AI columns after evaluation:
 
 - `AI Verdict`
 - `AI Fit Score`
+- `AI Unsuitable Reasons`
 - `AI Tailored CV`
 
 ## Troubleshooting GitHub Actions

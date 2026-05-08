@@ -26,15 +26,17 @@ LOGGER = logging.getLogger("job_fit_evaluator")
 
 STRICT_OUTPUT_INSTRUCTIONS = """
 Preserve the provided MASTER PROMPT logic and evidence rules exactly.
-For this automation pipeline, the first two output lines must be machine-readable:
+For this automation pipeline, the first three output lines must be machine-readable:
 
 Verdict: <Suitable | Not Suitable>
 Fit Score: <integer>%
+Unsuitable Reasons: <concise rejection reasons when Not Suitable, otherwise blank>
 
 Use "Suitable" only for realistically suitable roles. Use "Not Suitable" for
-roles that should be skipped, are unrealistic, or are only borderline. After
-those two lines, include the reason text and, if required by the MASTER PROMPT,
-the tailored LaTeX CV.
+roles that should be skipped, are unrealistic, or are only borderline. For Not
+Suitable roles, list the concrete reasons in Unsuitable Reasons. After those
+three lines, include any additional reason text and, if required by the MASTER
+PROMPT, the tailored LaTeX CV.
 """.strip()
 
 
@@ -253,8 +255,7 @@ def evaluate_records(
         max_workers = min(max(1, concurrency), len(batch))
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             futures = {
-                executor.submit(evaluate_record, record): record
-                for record in batch
+                executor.submit(evaluate_record, record): record for record in batch
             }
             for future in as_completed(futures):
                 record = futures[future]

@@ -11,6 +11,7 @@ MAX_CELL_CHARS = 49_000
 OUTPUT_COLUMNS = [
     "AI Verdict",
     "AI Fit Score",
+    "AI Unsuitable Reasons",
     "AI Tailored CV",
 ]
 """AI columns kept in the final spreadsheet."""
@@ -79,6 +80,7 @@ class JobEvaluation:
     verdict: str
     fit_score: int | None
     reason: str
+    unsuitable_reasons: str = ""
     raw_verdict: str = ""
     tailored_cv: str = ""
     evaluated_at: str = ""
@@ -94,11 +96,19 @@ class JobEvaluation:
             return "Irrelevant"
         return "Error"
 
+    @property
+    def unsuitable_reasons_value(self) -> str:
+        """Return rejection reasons only for rows marked not suitable."""
+        if self.verdict == "Not Suitable":
+            return self.unsuitable_reasons or self.reason
+        return ""
+
     def value_for_column(self, column_name: str) -> Any:
         """Return the output value for a named AI result column."""
         values = {
             "AI Verdict": self.verdict,
             "AI Fit Score": self.fit_score if self.fit_score is not None else "",
+            "AI Unsuitable Reasons": self.unsuitable_reasons_value,
             "AI Category": self.category,
             "AI Reason": self.reason,
             "AI Raw Verdict": self.raw_verdict,

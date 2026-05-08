@@ -9,9 +9,10 @@ Follow these rules:
 4. Mark jobs as "Not Suitable" when the role is unrealistic, too senior, unrelated, or missing important must-have requirements.
 5. If the job is suitable, provide a tailored LaTeX CV section when requested by your own workflow.
 
-Your first two lines must be exactly:
+Your first three lines must be exactly:
 
 Verdict: <Suitable | Not Suitable>
 Fit Score: <integer>%
+Unsuitable Reasons: <concise rejection reasons when Not Suitable, otherwise blank>
 
-After those two lines, include any private reasoning or tailored CV content your workflow needs.
+After those three lines, include any private reasoning or tailored CV content your workflow needs.

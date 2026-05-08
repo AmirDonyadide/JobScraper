@@ -21,6 +21,9 @@ LOGGER = logging.getLogger("job_fit_evaluator")
 
 VERDICT_RE = re.compile(r"(?im)^\s*Verdict\s*:\s*(?P<value>.+?)\s*$")
 FIT_SCORE_RE = re.compile(r"(?im)^\s*Fit\s+Score\s*:\s*(?P<score>\d{1,3})\s*%")
+UNSUITABLE_REASONS_LABEL_RE = re.compile(
+    r"(?i)^(?:\d+\.\s*)?unsuitable\s+reasons?\s*:\s*(?P<value>.*)$"
+)
 CV_SECTION_RE = re.compile(
     r"(?is)\n?\s*(?:\d+\.\s*)?Customized\s+CV\s*\(LaTeX\)\s*:\s*"
 )
@@ -259,6 +262,43 @@ def extract_reason(response_text: str) -> str:
             continue
         if re.match(r"(?i)^fit\s+score\s*:", stripped):
             continue
+        unsuitable_reasons_match = UNSUITABLE_REASONS_LABEL_RE.match(stripped)
+        if unsuitable_reasons_match:
+            label_value = unsuitable_reasons_match.group("value").strip()
+            if label_value:
+                lines.append(label_value)
+            continue
+        lines.append(line.rstrip())
+
+    return "\n".join(lines).strip()
+
+
+def extract_unsuitable_reasons(response_text: str) -> str:
+    """Extract the labeled reasons for rejecting a not-suitable job."""
+    evaluation_text = remove_tailored_cv(response_text)
+    lines = []
+    collecting = False
+
+    for line in evaluation_text.splitlines():
+        stripped = line.strip()
+        label_match = UNSUITABLE_REASONS_LABEL_RE.match(stripped)
+        if label_match:
+            collecting = True
+            label_value = label_match.group("value").strip()
+            if label_value:
+                lines.append(label_value)
+            continue
+
+        if not collecting:
+            continue
+        if re.match(r"(?i)^verdict\s*:", stripped):
+            break
+        if re.match(r"(?i)^fit\s+score\s*:", stripped):
+            break
+        if not stripped:
+            if lines and lines[-1]:
+                lines.append("")
+            continue
         lines.append(line.rstrip())
 
     return "\n".join(lines).strip()
@@ -299,6 +339,7 @@ def parse_model_response(
             verdict="Error",
             fit_score=None,
             reason=extract_reason(response_text),
+            unsuitable_reasons=extract_unsuitable_reasons(response_text),
             raw_verdict=raw_verdict,
             tailored_cv=extract_tailored_cv(response_text),
             evaluated_at=evaluated_at,
@@ -311,6 +352,11 @@ def parse_model_response(
         verdict=verdict,
         fit_score=score,
         reason=extract_reason(response_text),
+        unsuitable_reasons=(
+            extract_unsuitable_reasons(response_text)
+            if verdict == "Not Suitable"
+            else ""
+        ),
         raw_verdict=raw_verdict,
         tailored_cv=extract_tailored_cv(response_text),
         evaluated_at=evaluated_at,
