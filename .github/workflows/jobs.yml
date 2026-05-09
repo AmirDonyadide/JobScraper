@@ -35,7 +35,7 @@ jobs:
       APIFY_API_TOKEN: ${{ secrets.APIFY_API_TOKEN }}
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       GOOGLE_SPREADSHEET_ID: ${{ secrets.GOOGLE_SPREADSHEET_ID }}
-      GOOGLE_TOKEN_JSON: ${{ secrets.GOOGLE_TOKEN_JSON }}
+      GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
       JOB_KEYWORDS_TEXT: ${{ secrets.JOB_KEYWORDS_TEXT }}
       MASTER_PROMPT_TEXT: ${{ secrets.MASTER_PROMPT_TEXT }}
       MASTER_CV_TEX: ${{ secrets.MASTER_CV_TEX }}
@@ -91,8 +91,8 @@ jobs:
             missing=1
           fi
 
-          if [ -z "${GOOGLE_TOKEN_JSON}" ]; then
-            echo "::error::Missing repository secret GOOGLE_TOKEN_JSON. GitHub Actions cannot complete browser-based Google OAuth."
+          if [ -z "${GOOGLE_SERVICE_ACCOUNT_JSON}" ]; then
+            echo "::error::Missing repository secret GOOGLE_SERVICE_ACCOUNT_JSON. Paste the full service-account JSON key into this secret."
             missing=1
           fi
 
@@ -149,16 +149,31 @@ jobs:
           import os
           from pathlib import Path
 
-          token_json = os.environ["GOOGLE_TOKEN_JSON"].strip()
+          import json
+          import sys
+
+          service_account_json = os.environ["GOOGLE_SERVICE_ACCOUNT_JSON"].strip()
           spreadsheet_id = os.environ.get("GOOGLE_SPREADSHEET_ID", "").strip()
 
-          Path("google_token.json").write_text(token_json, encoding="utf-8")
+          try:
+              credentials = json.loads(service_account_json)
+          except json.JSONDecodeError as exc:
+              print(f"::error::GOOGLE_SERVICE_ACCOUNT_JSON is not valid JSON: {exc}")
+              sys.exit(1)
+
+          if credentials.get("type") != "service_account":
+              print("::error::GOOGLE_SERVICE_ACCOUNT_JSON must be a service-account key JSON.")
+              sys.exit(1)
+
+          Path("google_service_account.json").write_text(
+              service_account_json, encoding="utf-8"
+          )
 
           if spreadsheet_id:
               Path("google_spreadsheet_id.txt").write_text(spreadsheet_id, encoding="utf-8")
           PY
 
-          chmod 600 google_token.json
+          chmod 600 google_service_account.json
 
           if [ -f google_spreadsheet_id.txt ]; then
             chmod 600 google_spreadsheet_id.txt

@@ -5,7 +5,11 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from jobscraper.paths import GOOGLE_CLIENT_SECRET_FILE, GOOGLE_TOKEN_FILE
+from jobscraper.paths import (
+    GOOGLE_CLIENT_SECRET_FILE,
+    GOOGLE_SERVICE_ACCOUNT_FILE,
+    GOOGLE_TOKEN_FILE,
+)
 
 GOOGLE_SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
 """OAuth scopes required to read and write Google Sheets."""
@@ -14,6 +18,7 @@ GOOGLE_SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
 def build_google_sheets_service(
     *,
     error_cls: type[RuntimeError],
+    service_account_file: Path = GOOGLE_SERVICE_ACCOUNT_FILE,
     token_file: Path = GOOGLE_TOKEN_FILE,
     client_secret_file: Path = GOOGLE_CLIENT_SECRET_FILE,
     scopes: list[str] = GOOGLE_SCOPES,
@@ -21,14 +26,20 @@ def build_google_sheets_service(
     """Build an authenticated Google Sheets API service."""
     try:
         from google.auth.transport.requests import Request
+        from google.oauth2 import service_account
         from google.oauth2.credentials import Credentials
-        from google_auth_oauthlib.flow import InstalledAppFlow
         from googleapiclient.discovery import build
     except ImportError as exc:
         raise error_cls(
             "Missing Google API packages. Install dependencies with: "
             "python -m pip install -r requirements.txt"
         ) from exc
+
+    if service_account_file.exists():
+        creds = service_account.Credentials.from_service_account_file(
+            str(service_account_file), scopes=scopes
+        )
+        return build("sheets", "v4", credentials=creds, cache_discovery=False)
 
     creds = None
     if token_file.exists():
@@ -42,10 +53,20 @@ def build_google_sheets_service(
         else:
             if not client_secret_file.exists():
                 raise error_cls(
-                    f"Missing {client_secret_file.name}. Create a Google OAuth "
-                    "Desktop client, download its JSON credentials, and save it "
-                    "in this folder."
+                    f"Missing {service_account_file.name}. Create a Google service "
+                    "account, download its JSON key, save it in this folder, and "
+                    "share the target spreadsheet with the service-account email. "
+                    f"For local OAuth fallback, create {client_secret_file.name} "
+                    "instead."
                 )
+            try:
+                from google_auth_oauthlib.flow import InstalledAppFlow
+            except ImportError as exc:
+                raise error_cls(
+                    "Missing Google OAuth packages for local browser auth. Install "
+                    "dependencies with: python -m pip install -r requirements.txt"
+                ) from exc
+
             flow = InstalledAppFlow.from_client_secrets_file(
                 str(client_secret_file), scopes
             )

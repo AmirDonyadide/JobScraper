@@ -219,14 +219,20 @@ __marimo__/
 
 
 .DS_Store
+*.swp
+*.swo
 
 # Generated scraper output
 jobs.xlsx
 jobs_*.xlsx
 ~$*.xlsx
 
-# Local Google OAuth credentials and tokens
+# Local Google credentials and tokens
 google_client_secret.json
+google_service_account*.json
+*service_account*.json
+*service-account*.json
+jobfinder-*.json
 google_token.json
 google_spreadsheet_id.txt
 

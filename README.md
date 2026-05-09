@@ -103,6 +103,9 @@ Then edit:
 
 Do not commit these private files.
 
+Your Google service-account key is private too. For local runs, keep it at the
+repository root as `google_service_account.json`.
+
 ## Local `.env` Settings
 
 Open `.env` and set at least:
@@ -129,36 +132,45 @@ Common settings:
 | `JOB_EVAL_LARGE_QUEUE_THRESHOLD` | `200` | Enable request pacing when more than this many rows are queued for OpenAI. |
 | `JOB_EVAL_LARGE_QUEUE_SLEEP_MS` | `2000` | Milliseconds to wait between OpenAI request starts for large queues. |
 
-## Google Sheets Setup For Local Use
+## Google Sheets Setup
 
-You only need to do this once if you want to run locally or generate the token for GitHub Actions.
+Use a Google service account for Google Sheets access. This is the preferred setup
+for GitHub Actions because it does not rely on a browser-based OAuth refresh token.
 
 1. Open Google Cloud Console.
 2. Enable the Google Sheets API.
-3. Create an OAuth client for a Desktop app.
-4. Download the OAuth client JSON.
-5. Save it in this repository as:
+3. Go to `IAM & Admin -> Service Accounts`.
+4. Create a service account.
+5. Create and download a JSON key for that service account.
+6. Copy the `client_email` value from the JSON key.
+7. Open your target Google Sheet and share it with that email as **Editor**.
+
+For local runs, save the downloaded JSON key in this repository as:
 
 ```text
-google_client_secret.json
+google_service_account.json
 ```
 
-6. Run locally once:
+If Google downloaded the key with a project-specific name such as
+`jobfinder-495809-abc123.json`, rename it:
 
 ```bash
-python run_job_pipeline.py
+mv ~/Downloads/jobfinder-*.json google_service_account.json
 ```
 
-7. Complete the browser-based Google sign-in.
-
-After sign-in, JobFinder creates:
+Then set `GOOGLE_SPREADSHEET_ID` in `.env`, or save the spreadsheet ID in:
 
 ```text
-google_token.json
 google_spreadsheet_id.txt
 ```
 
 Do not commit these files. They are ignored by Git.
+
+Local OAuth with `google_client_secret.json` and `google_token.json` is still
+supported as a fallback, but service-account auth is simpler for scheduled runs.
+
+If you expose a service-account JSON key, delete that key in Google Cloud and
+create a fresh one before using it in GitHub.
 
 ## Run Online With GitHub Actions
 
@@ -173,7 +185,7 @@ It runs the full pipeline on GitHub:
 1. Checks out the repository.
 2. Installs Python dependencies.
 3. Writes your private keywords, prompt, and CV from GitHub secrets.
-4. Writes your Google token from GitHub secrets.
+4. Writes your Google service-account key from GitHub secrets.
 5. Scrapes jobs into Google Sheets.
 6. Evaluates every unevaluated row with OpenAI.
 
@@ -217,23 +229,16 @@ The spreadsheet ID is:
 
 This value goes into the GitHub secret `GOOGLE_SPREADSHEET_ID`.
 
-### 3. Generate `google_token.json`
+### 3. Create The Service Account Secret
 
-Run the pipeline locally once and complete Google login:
+Copy the full service-account JSON key into the GitHub secret:
 
-```bash
-python run_job_pipeline.py
+```text
+GOOGLE_SERVICE_ACCOUNT_JSON
 ```
 
-After the local run, copy the full token JSON:
-
-```bash
-cat google_token.json | pbcopy
-```
-
-Paste that full JSON into the GitHub secret `GOOGLE_TOKEN_JSON`.
-
-This is required because GitHub Actions cannot open a browser for first-time Google OAuth.
+Make sure the target spreadsheet is shared with the service-account email as
+**Editor**. The email is the `client_email` field inside the JSON key.
 
 ### 4. Add GitHub Repository Secrets
 
@@ -250,7 +255,7 @@ Add these secrets exactly:
 | `APIFY_API_TOKEN` | Your Apify API token, for example `apify_api_...`. |
 | `OPENAI_API_KEY` | Your OpenAI API key, for example `sk-...` or `sk-proj-...`. |
 | `GOOGLE_SPREADSHEET_ID` | The spreadsheet ID from the Google Sheet URL. |
-| `GOOGLE_TOKEN_JSON` | The full contents of local `google_token.json`. |
+| `GOOGLE_SERVICE_ACCOUNT_JSON` | The full contents of the service-account JSON key. |
 | `JOB_KEYWORDS_TEXT` | The full contents of `configs/keywords.txt`. |
 | `MASTER_PROMPT_TEXT` | The full contents of `prompts/master_prompt.txt`. |
 | `MASTER_CV_TEX` | The full contents of `cv/master_cv.tex`. |
@@ -261,7 +266,7 @@ On macOS, you can copy each private file like this:
 cat configs/keywords.txt | pbcopy
 cat prompts/master_prompt.txt | pbcopy
 cat cv/master_cv.tex | pbcopy
-cat google_token.json | pbcopy
+cat google_service_account.json | pbcopy
 ```
 
 Paste each copied value into the matching GitHub secret.
@@ -388,8 +393,8 @@ Final AI columns after evaluation:
 | Problem | What to check |
 |---|---|
 | `Missing repository secret ...` | Add the named secret under GitHub repo settings. |
-| `GOOGLE_TOKEN_JSON` error | Copy the full contents of `google_token.json`, not `google_client_secret.json`. |
-| Google authentication fails | Run locally once again, refresh `google_token.json`, and update the GitHub secret. |
+| `GOOGLE_SERVICE_ACCOUNT_JSON` error | Copy the full service-account JSON key, not an OAuth client JSON. |
+| Google authentication fails | Confirm the spreadsheet is shared with the service-account `client_email` as Editor. |
 | Spreadsheet not found | Check that `GOOGLE_SPREADSHEET_ID` is only the ID, not the full URL. |
 | Workflow cannot push or fetch repo | Check GitHub authentication and repository permissions. |
 | OpenAI rate-limit retries | Lower `JOB_EVAL_CONCURRENCY` and `JOB_EVAL_BATCH_SIZE`. |
@@ -404,6 +409,10 @@ Never commit these files:
 ```text
 .env
 google_client_secret.json
+google_service_account*.json
+*service_account*.json
+*service-account*.json
+jobfinder-*.json
 google_token.json
 google_spreadsheet_id.txt
 configs/keywords.txt

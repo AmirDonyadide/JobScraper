@@ -28,6 +28,9 @@ GOOGLE_CLIENT_SECRET_FILE = PROJECT_ROOT / "google_client_secret.json"
 GOOGLE_TOKEN_FILE = PROJECT_ROOT / "google_token.json"
 """Google OAuth token cache file."""
 
+GOOGLE_SERVICE_ACCOUNT_FILE = PROJECT_ROOT / "google_service_account.json"
+"""Google service-account credentials file."""
+
 GOOGLE_SPREADSHEET_ID_FILE = PROJECT_ROOT / "google_spreadsheet_id.txt"
 """Google spreadsheet ID cache file."""
 
