@@ -21,6 +21,8 @@ from jobscraper.scraper.settings import (
 LOGGER = logging.getLogger("jobscraper.scraper")
 APIFY_POLL_INTERVAL_SECONDS = 15
 APIFY_TERMINAL_STATUSES = {"SUCCEEDED", "FAILED", "ABORTED", "TIMED-OUT"}
+RETRYABLE_APIFY_HTTP_STATUS_CODES = {408, 429, 500, 502, 503, 504}
+MAX_APIFY_RETRY_DELAY_SECONDS = 300
 
 INDEED_DOMAIN_BY_COUNTRY = {
     "us": "www.indeed.com",
@@ -48,6 +50,14 @@ class ApifyRunError(RuntimeError):
 
 class ApifyRunTimeoutError(ApifyRunError):
     """Raised when an Apify actor run exceeds the configured timeout."""
+
+
+class ApifyTransientError(RuntimeError):
+    """Raised for temporary Apify API errors that should be retried."""
+
+
+class SearchExecutionError(RuntimeError):
+    """Raised when one keyword search cannot be completed."""
 
 
 @dataclass(frozen=True)
@@ -98,6 +108,22 @@ def apify_http_timeout(settings: ScraperSettings) -> int:
     return max(1, settings.apify_client_timeout_seconds)
 
 
+def is_retryable_payment_error(response: requests.Response) -> bool:
+    """Return true for Apify 402 memory-limit pressure that can clear later."""
+    if response.status_code != 402:
+        return False
+    message = apify_error_message(response).lower()
+    return "memory limit" in message and "currently used" in message
+
+
+def is_retryable_apify_response(response: requests.Response) -> bool:
+    """Return true when an Apify API response is likely temporary."""
+    return (
+        response.status_code in RETRYABLE_APIFY_HTTP_STATUS_CODES
+        or is_retryable_payment_error(response)
+    )
+
+
 def check_apify_response(response: requests.Response, actor_id: str) -> None:
     """Raise a user-facing exception for Apify auth/access errors."""
     if response.status_code in (401, 403):
@@ -106,6 +132,12 @@ def check_apify_response(response: requests.Response, actor_id: str) -> None:
             "Apify rejected the request. Check that APIFY_API_TOKEN is valid, "
             f"that your account can run {actor_id}, and that billing/trial "
             f"access is active. Apify said: {message}"
+        )
+
+    if is_retryable_apify_response(response):
+        message = apify_error_message(response)
+        raise ApifyTransientError(
+            f"Apify returned HTTP {response.status_code} for {actor_id}: {message}"
         )
 
     response.raise_for_status()
@@ -335,42 +367,71 @@ def run_actor(
     return fetch_dataset_items(settings, actor_id, str(dataset_id), max_items)
 
 
+def retry_delay_seconds(settings: ScraperSettings, attempt: int) -> int:
+    """Return the backoff delay before retrying a transient Apify issue."""
+    return min(
+        settings.apify_retry_delay_seconds * attempt,
+        MAX_APIFY_RETRY_DELAY_SECONDS,
+    )
+
+
+def search_failure_message(label: str, exc: Exception) -> str:
+    """Build a concise fatal error message for one failed keyword search."""
+    return f"Search {label!r} could not be completed: {exc}"
+
+
 def fetch_jobs_for_search(
     settings: ScraperSettings, search: SearchRequest
 ) -> list[dict[str, Any]]:
     """Call Apify for one search and return annotated job dictionaries."""
     label = search.display_label
-    try:
-        jobs = run_actor(settings, search.actor_id, search.payload, search.max_items)
-        return annotate_jobs(jobs, search.source, search.source_label)
-    except ApifyRunTimeoutError as exc:
-        LOGGER.warning("Timeout for search %r: %s Skipping.", label, exc)
-        return []
-    except ApifyRunError as exc:
-        LOGGER.warning("Apify run failed for search %r: %s Skipping.", label, exc)
-        return []
-    except requests.exceptions.Timeout:
-        LOGGER.warning(
-            "HTTP timeout while talking to Apify for search %r after %ss; skipping.",
-            label,
-            apify_http_timeout(settings),
-        )
-        return []
-    except requests.exceptions.ConnectionError as exc:
-        raise ApifyConfigurationError(
-            f"Could not connect to Apify API while searching '{label}'. "
-            f"Check your internet connection/DNS and try again. Details: {exc}"
-        ) from exc
-    except ApifyConfigurationError:
-        raise
-    except requests.exceptions.HTTPError as exc:
-        response = exc.response
-        details = f" {apify_error_message(response)}" if response is not None else ""
-        LOGGER.warning("HTTP error for search %r: %s.%s Skipping.", label, exc, details)
-        return []
-    except Exception as exc:
-        LOGGER.warning("Unexpected error for search %r: %s. Skipping.", label, exc)
-        return []
+    total_attempts = settings.apify_transient_error_retries + 1
+    for attempt in range(1, total_attempts + 1):
+        try:
+            jobs = run_actor(
+                settings,
+                search.actor_id,
+                search.payload,
+                search.max_items,
+            )
+            return annotate_jobs(jobs, search.source, search.source_label)
+        except ApifyConfigurationError:
+            raise
+        except ApifyRunTimeoutError as exc:
+            raise SearchExecutionError(search_failure_message(label, exc)) from exc
+        except requests.exceptions.HTTPError as exc:
+            response = exc.response
+            details = (
+                f" {apify_error_message(response)}" if response is not None else ""
+            )
+            raise SearchExecutionError(
+                f"Search {label!r} could not be completed: {exc}.{details}"
+            ) from exc
+        except (
+            ApifyTransientError,
+            ApifyRunError,
+            requests.exceptions.Timeout,
+            requests.exceptions.ConnectionError,
+        ) as exc:
+            if attempt >= total_attempts:
+                raise SearchExecutionError(search_failure_message(label, exc)) from exc
+
+            delay = retry_delay_seconds(settings, attempt)
+            LOGGER.warning(
+                "Temporary Apify issue for search %r on attempt %s/%s: %s. "
+                "Retrying in %ss.",
+                label,
+                attempt,
+                total_attempts,
+                exc,
+                delay,
+            )
+            if delay:
+                time.sleep(delay)
+        except Exception as exc:
+            raise SearchExecutionError(search_failure_message(label, exc)) from exc
+
+    raise SearchExecutionError(f"Search {label!r} ended without a result.")
 
 
 def run_all_searches(
@@ -451,6 +512,9 @@ def run_all_searches(
                         )
                         failed_sources[search.source] = str(exc)
                     skipped_searches.append(label)
+                except SearchExecutionError as exc:
+                    LOGGER.error("%s", exc)
+                    raise
                 else:
                     all_results.append((idx, search.keyword, jobs))
                     if jobs:

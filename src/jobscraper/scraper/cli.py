@@ -157,6 +157,14 @@ def main() -> int:
     LOGGER.info("Max applicants/job: %s.", settings.max_applicants)
     LOGGER.info("Apify child run memory: %s MB.", settings.apify_run_memory_mb)
     LOGGER.info("Apify child run timeout: %ss.", settings.apify_run_timeout_seconds)
+    LOGGER.info(
+        "Apify transient error retries: %s.",
+        settings.apify_transient_error_retries,
+    )
+    LOGGER.info(
+        "Apify retry base delay: %ss.",
+        settings.apify_retry_delay_seconds,
+    )
     if settings.delay_between_requests:
         LOGGER.info(
             "Delay between starting searches: %ss.",

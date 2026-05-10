@@ -30,6 +30,8 @@ TOKEN_PLACEHOLDER = "apify_api_XXXXXXXXXXXX"
 SPREADSHEET_TITLE = "jobs"
 DEFAULT_APIFY_RUN_TIMEOUT_SECONDS = 3600
 DEFAULT_APIFY_CLIENT_TIMEOUT_SECONDS = 120
+DEFAULT_APIFY_TRANSIENT_ERROR_RETRIES = 5
+DEFAULT_APIFY_RETRY_DELAY_SECONDS = 30
 
 LINKEDIN_ACTOR_ID = "curious_coder~linkedin-jobs-scraper"
 INDEED_ACTOR_ID = "misceres~indeed-scraper"
@@ -98,6 +100,8 @@ class ScraperSettings:
     apify_run_memory_mb: int
     apify_run_timeout_seconds: int
     apify_client_timeout_seconds: int
+    apify_transient_error_retries: int
+    apify_retry_delay_seconds: int
     delay_between_requests: int
     search_window_buffer_seconds: int
     location: str
@@ -190,6 +194,17 @@ def load_scraper_settings(env: EnvSettings | None = None) -> ScraperSettings:
         apify_run_memory_mb=max(128, env.get_int("APIFY_RUN_MEMORY_MB", 512)),
         apify_run_timeout_seconds=apify_run_timeout_seconds,
         apify_client_timeout_seconds=apify_client_timeout_seconds,
+        apify_transient_error_retries=max(
+            0,
+            env.get_int(
+                "APIFY_TRANSIENT_ERROR_RETRIES",
+                DEFAULT_APIFY_TRANSIENT_ERROR_RETRIES,
+            ),
+        ),
+        apify_retry_delay_seconds=max(
+            0,
+            env.get_int("APIFY_RETRY_DELAY_SECONDS", DEFAULT_APIFY_RETRY_DELAY_SECONDS),
+        ),
         delay_between_requests=max(
             0, env.get_int("JOBSCRAPER_DELAY_BETWEEN_REQUESTS", 0)
         ),

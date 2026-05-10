@@ -10,7 +10,10 @@ import requests
 
 from jobscraper.scraper.search import (
     ApifyRunTimeoutError,
+    SearchExecutionError,
+    SearchRequest,
     apify_http_timeout,
+    fetch_jobs_for_search,
     run_actor,
 )
 
@@ -41,6 +44,8 @@ def make_settings() -> SimpleNamespace:
         apify_run_timeout_seconds=3600,
         apify_run_memory_mb=512,
         apify_client_timeout_seconds=120,
+        apify_transient_error_retries=5,
+        apify_retry_delay_seconds=0,
     )
 
 
@@ -101,3 +106,77 @@ def test_run_actor_reports_apify_timed_out_status(monkeypatch):
 
     with pytest.raises(ApifyRunTimeoutError):
         run_actor(settings, "owner~actor", {"input": True}, 500)
+
+
+def test_fetch_jobs_for_search_retries_temporary_apify_http_errors(monkeypatch):
+    """A temporary Apify 502 should be retried instead of becoming 0 results."""
+    settings = make_settings()
+    post_statuses = [502, 201]
+    post_calls = 0
+
+    def fake_post(url: str, **kwargs: Any) -> FakeResponse:
+        nonlocal post_calls
+        post_calls += 1
+        status_code = post_statuses.pop(0)
+        if status_code >= 400:
+            return FakeResponse("<h1>Bad Gateway</h1>", status_code=status_code)
+        return FakeResponse({"data": {"id": "run-1", "defaultDatasetId": "dataset-1"}})
+
+    def fake_get(url: str, **kwargs: Any) -> FakeResponse:
+        if "/actor-runs/" in url:
+            return FakeResponse(
+                {
+                    "data": {
+                        "id": "run-1",
+                        "status": "SUCCEEDED",
+                        "defaultDatasetId": "dataset-1",
+                    }
+                }
+            )
+        return FakeResponse([{"title": "GIS Analyst"}])
+
+    monkeypatch.setattr("jobscraper.scraper.search.requests.post", fake_post)
+    monkeypatch.setattr("jobscraper.scraper.search.requests.get", fake_get)
+
+    jobs = fetch_jobs_for_search(
+        settings,
+        SearchRequest(
+            source="linkedin",
+            source_label="LinkedIn",
+            keyword="GIS",
+            display_label="LinkedIn / GIS",
+            actor_id="owner~actor",
+            payload={"input": True},
+            max_items=500,
+        ),
+    )
+
+    assert post_calls == 2
+    assert jobs == [
+        {"title": "GIS Analyst", "_source": "linkedin", "_source_label": "LinkedIn"}
+    ]
+
+
+def test_fetch_jobs_for_search_fails_after_retry_budget(monkeypatch):
+    """A keyword should fail the pipeline instead of being silently skipped."""
+    settings = make_settings()
+    settings.apify_transient_error_retries = 1
+
+    def fake_post(url: str, **kwargs: Any) -> FakeResponse:
+        return FakeResponse("<h1>Bad Gateway</h1>", status_code=502)
+
+    monkeypatch.setattr("jobscraper.scraper.search.requests.post", fake_post)
+
+    with pytest.raises(SearchExecutionError):
+        fetch_jobs_for_search(
+            settings,
+            SearchRequest(
+                source="linkedin",
+                source_label="LinkedIn",
+                keyword="GIS",
+                display_label="LinkedIn / GIS",
+                actor_id="owner~actor",
+                payload={"input": True},
+                max_items=500,
+            ),
+        )

@@ -42,6 +42,8 @@ def make_settings(run_started_at: datetime) -> ScraperSettings:
         apify_run_memory_mb=512,
         apify_run_timeout_seconds=300,
         apify_client_timeout_seconds=360,
+        apify_transient_error_retries=5,
+        apify_retry_delay_seconds=30,
         delay_between_requests=0,
         search_window_buffer_seconds=3600,
         location="Germany",

@@ -55,6 +55,8 @@ jobs:
       APIFY_RUN_MEMORY_MB: "512"
       APIFY_RUN_TIMEOUT_SECONDS: "3600"
       APIFY_CLIENT_TIMEOUT_SECONDS: "120"
+      APIFY_TRANSIENT_ERROR_RETRIES: "5"
+      APIFY_RETRY_DELAY_SECONDS: "30"
       JOBSCRAPER_DELAY_BETWEEN_REQUESTS: "0"
       JOBSCRAPER_SCRAPE_COMPANY_DETAILS: "false"
       JOBSCRAPER_TIMEZONE: Europe/Berlin
@@ -216,6 +218,8 @@ jobs:
           echo "Apify child run memory: ${APIFY_RUN_MEMORY_MB} MB"
           echo "Apify child run timeout: ${APIFY_RUN_TIMEOUT_SECONDS}s"
           echo "Apify HTTP request timeout: ${APIFY_CLIENT_TIMEOUT_SECONDS}s"
+          echo "Apify transient error retries: ${APIFY_TRANSIENT_ERROR_RETRIES}"
+          echo "Apify retry base delay: ${APIFY_RETRY_DELAY_SECONDS}s"
           echo "Evaluator model: ${JOB_EVAL_OPENAI_MODEL}"
           echo "Evaluator concurrency: ${JOB_EVAL_CONCURRENCY}"
 

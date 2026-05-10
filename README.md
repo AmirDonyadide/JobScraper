@@ -127,6 +127,8 @@ Common settings:
 | `JOBSCRAPER_SEARCH_WINDOW_BUFFER_SECONDS` | `3600` | Extra search-window padding before exact posted-time filtering, to avoid missing jobs while the run is starting. |
 | `APIFY_RUN_TIMEOUT_SECONDS` | `3600` | Maximum Apify actor runtime per keyword search. |
 | `APIFY_CLIENT_TIMEOUT_SECONDS` | `120` | HTTP timeout for individual Apify API calls while starting, polling, and reading results. |
+| `APIFY_TRANSIENT_ERROR_RETRIES` | `5` | Number of retry attempts for temporary Apify API/run errors before failing the run. |
+| `APIFY_RETRY_DELAY_SECONDS` | `30` | Base delay before retrying a temporary Apify issue; later retries back off from this value. |
 | `JOBSCRAPER_TIMEZONE` | `Europe/Berlin` | Timezone for terminal logs and new Excel/Google Sheets tab names. |
 | `JOBSCRAPER_POSTED_TIMEZONE` | `Europe/Berlin` | Timezone for the `Posted` column. |
 | `JOB_EVAL_OPENAI_MODEL` | `gpt-5-mini` | OpenAI model used for evaluation. |
@@ -317,13 +319,15 @@ The current workflow uses:
 ```yaml
 APIFY_RUN_TIMEOUT_SECONDS: "3600"
 APIFY_CLIENT_TIMEOUT_SECONDS: "120"
+APIFY_TRANSIENT_ERROR_RETRIES: "5"
+APIFY_RETRY_DELAY_SECONDS: "30"
 JOB_EVAL_CONCURRENCY: "8"
 JOB_EVAL_BATCH_SIZE: "40"
 JOB_EVAL_LARGE_QUEUE_THRESHOLD: "200"
 JOB_EVAL_LARGE_QUEUE_SLEEP_MS: "2000"
 ```
 
-This keeps 15 Apify keyword searches running in parallel, with 512 MB assigned to each actor run. That uses up to 7680 MB of Apify memory at once, which fits inside an 8 GB Apify limit. Each keyword search gets up to 60 minutes of actor runtime, so keywords with many matching positions have much more time before that keyword is marked as timed out. The evaluator allows up to 8 OpenAI requests at the same time, with jobs grouped locally in batches of 40.
+This keeps 15 Apify keyword searches running in parallel, with 512 MB assigned to each actor run. That uses up to 7680 MB of Apify memory at once, which fits inside an 8 GB Apify limit. Each keyword search gets up to 60 minutes of actor runtime, so keywords with many matching positions have much more time before that keyword is marked as timed out. Temporary Apify API issues such as 502/503/504 responses, rate limits, HTTP timeouts, and short memory-limit pressure are retried before the workflow fails. The evaluator allows up to 8 OpenAI requests at the same time, with jobs grouped locally in batches of 40.
 
 When more than 200 rows are queued, the evaluator also spaces OpenAI request starts by 2000 ms. Each row is saved back to the same sheet immediately after it is evaluated, so a later failure keeps the completed rows.
 
