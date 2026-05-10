@@ -38,7 +38,7 @@ def make_settings() -> SimpleNamespace:
     """Build the settings attributes used by Apify search execution."""
     return SimpleNamespace(
         apify_api_token="apify_api_real_token",
-        apify_run_timeout_seconds=1800,
+        apify_run_timeout_seconds=3600,
         apify_run_memory_mb=512,
         apify_client_timeout_seconds=120,
     )
@@ -76,7 +76,7 @@ def test_run_actor_uses_async_api_and_fetches_dataset(monkeypatch):
     assert calls[0] == (
         "POST",
         "https://api.apify.com/v2/acts/owner~actor/runs",
-        {"timeout": 1800, "memory": 512, "maxItems": 500},
+        {"timeout": 3600, "memory": 512, "maxItems": 500},
     )
     assert calls[2] == (
         "GET",

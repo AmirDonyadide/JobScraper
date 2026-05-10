@@ -37,7 +37,7 @@ jobs:
   scrape-and-evaluate:
     name: Run JobFinder pipeline
     runs-on: ubuntu-latest
-    timeout-minutes: 240
+    timeout-minutes: 360
 
     env:
       APIFY_API_TOKEN: ${{ secrets.APIFY_API_TOKEN }}
@@ -53,7 +53,7 @@ jobs:
       JOBSCRAPER_SEARCH_CONCURRENCY: "15"
       JOBSCRAPER_SEARCH_WINDOW_BUFFER_SECONDS: "3600"
       APIFY_RUN_MEMORY_MB: "512"
-      APIFY_RUN_TIMEOUT_SECONDS: "1800"
+      APIFY_RUN_TIMEOUT_SECONDS: "3600"
       APIFY_CLIENT_TIMEOUT_SECONDS: "120"
       JOBSCRAPER_DELAY_BETWEEN_REQUESTS: "0"
       JOBSCRAPER_SCRAPE_COMPANY_DETAILS: "false"

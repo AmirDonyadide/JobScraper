@@ -125,7 +125,7 @@ Common settings:
 | `JOBSCRAPER_SEARCH_CONCURRENCY` | `15` | Number of Apify searches run at the same time. |
 | `JOBSCRAPER_MAX_RESULTS_PER_SEARCH` | `500` | Maximum LinkedIn results per keyword. |
 | `JOBSCRAPER_SEARCH_WINDOW_BUFFER_SECONDS` | `3600` | Extra search-window padding before exact posted-time filtering, to avoid missing jobs while the run is starting. |
-| `APIFY_RUN_TIMEOUT_SECONDS` | `1800` | Maximum Apify actor runtime per keyword search. |
+| `APIFY_RUN_TIMEOUT_SECONDS` | `3600` | Maximum Apify actor runtime per keyword search. |
 | `APIFY_CLIENT_TIMEOUT_SECONDS` | `120` | HTTP timeout for individual Apify API calls while starting, polling, and reading results. |
 | `JOBSCRAPER_TIMEZONE` | `Europe/Berlin` | Timezone for terminal logs and new Excel/Google Sheets tab names. |
 | `JOBSCRAPER_POSTED_TIMEZONE` | `Europe/Berlin` | Timezone for the `Posted` column. |
@@ -315,7 +315,7 @@ GitHub may delay scheduled workflows slightly. That is normal.
 The current workflow uses:
 
 ```yaml
-APIFY_RUN_TIMEOUT_SECONDS: "1800"
+APIFY_RUN_TIMEOUT_SECONDS: "3600"
 APIFY_CLIENT_TIMEOUT_SECONDS: "120"
 JOB_EVAL_CONCURRENCY: "8"
 JOB_EVAL_BATCH_SIZE: "40"
@@ -323,7 +323,7 @@ JOB_EVAL_LARGE_QUEUE_THRESHOLD: "200"
 JOB_EVAL_LARGE_QUEUE_SLEEP_MS: "2000"
 ```
 
-This gives each Apify keyword search up to 30 minutes of actor runtime. The scraper starts Apify runs asynchronously and polls them, so long keyword searches are not limited by Apify's 300-second synchronous endpoint. The evaluator allows up to 8 OpenAI requests at the same time, with jobs grouped locally in batches of 40.
+This keeps 15 Apify keyword searches running in parallel, with 512 MB assigned to each actor run. That uses up to 7680 MB of Apify memory at once, which fits inside an 8 GB Apify limit. Each keyword search gets up to 60 minutes of actor runtime, so keywords with many matching positions have much more time before that keyword is marked as timed out. The evaluator allows up to 8 OpenAI requests at the same time, with jobs grouped locally in batches of 40.
 
 When more than 200 rows are queued, the evaluator also spaces OpenAI request starts by 2000 ms. Each row is saved back to the same sheet immediately after it is evaluated, so a later failure keeps the completed rows.
 
