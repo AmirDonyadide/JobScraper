@@ -12,6 +12,14 @@ on:
           - linkedin
           - indeed
           - both
+      run_mode:
+        description: "Pipeline mode"
+        required: true
+        default: "scrape_and_evaluate"
+        type: choice
+        options:
+          - scrape_and_evaluate
+          - scrape_only
 
   schedule:
     # Runs once daily during the 07:00 UTC hour. Avoid minute 0 because GitHub
@@ -27,9 +35,9 @@ concurrency:
 
 jobs:
   scrape-and-evaluate:
-    name: Scrape and evaluate jobs
+    name: Run JobFinder pipeline
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 240
 
     env:
       APIFY_API_TOKEN: ${{ secrets.APIFY_API_TOKEN }}
@@ -41,10 +49,12 @@ jobs:
       MASTER_CV_TEX: ${{ secrets.MASTER_CV_TEX }}
       JOBSCRAPER_OUTPUT_MODE: "google_sheets"
       JOBSCRAPER_SOURCES: ${{ github.event.inputs.sources || 'linkedin' }}
+      JOBSCRAPER_PIPELINE_MODE: ${{ github.event.inputs.run_mode || 'scrape_and_evaluate' }}
       JOBSCRAPER_SEARCH_CONCURRENCY: "15"
       JOBSCRAPER_SEARCH_WINDOW_BUFFER_SECONDS: "3600"
       APIFY_RUN_MEMORY_MB: "512"
-      APIFY_RUN_TIMEOUT_SECONDS: "300"
+      APIFY_RUN_TIMEOUT_SECONDS: "1800"
+      APIFY_CLIENT_TIMEOUT_SECONDS: "120"
       JOBSCRAPER_DELAY_BETWEEN_REQUESTS: "0"
       JOBSCRAPER_SCRAPE_COMPANY_DETAILS: "false"
       JOBSCRAPER_TIMEZONE: Europe/Berlin
@@ -86,7 +96,12 @@ jobs:
             missing=1
           fi
 
-          if [ -z "${OPENAI_API_KEY}" ]; then
+          should_evaluate=1
+          if [ "${JOBSCRAPER_PIPELINE_MODE}" = "scrape_only" ]; then
+            should_evaluate=0
+          fi
+
+          if [ "$should_evaluate" -eq 1 ] && [ -z "${OPENAI_API_KEY}" ]; then
             echo "::error::Missing repository secret OPENAI_API_KEY."
             missing=1
           fi
@@ -106,12 +121,12 @@ jobs:
             missing=1
           fi
 
-          if [ -z "${MASTER_PROMPT_TEXT}" ]; then
+          if [ "$should_evaluate" -eq 1 ] && [ -z "${MASTER_PROMPT_TEXT}" ]; then
             echo "::error::Missing repository secret MASTER_PROMPT_TEXT."
             missing=1
           fi
 
-          if [ -z "${MASTER_CV_TEX}" ]; then
+          if [ "$should_evaluate" -eq 1 ] && [ -z "${MASTER_CV_TEX}" ]; then
             echo "::error::Missing repository secret MASTER_CV_TEX."
             missing=1
           fi
@@ -131,9 +146,15 @@ jobs:
 
           private_files = {
               Path("configs/keywords.txt"): os.environ["JOB_KEYWORDS_TEXT"],
-              Path("prompts/master_prompt.txt"): os.environ["MASTER_PROMPT_TEXT"],
-              Path("cv/master_cv.tex"): os.environ["MASTER_CV_TEX"],
           }
+
+          if os.environ["JOBSCRAPER_PIPELINE_MODE"] != "scrape_only":
+              private_files.update(
+                  {
+                      Path("prompts/master_prompt.txt"): os.environ["MASTER_PROMPT_TEXT"],
+                      Path("cv/master_cv.tex"): os.environ["MASTER_CV_TEX"],
+                  }
+              )
 
           for path, value in private_files.items():
               path.parent.mkdir(parents=True, exist_ok=True)
@@ -179,23 +200,26 @@ jobs:
             chmod 600 google_spreadsheet_id.txt
           fi
 
-      - name: Run scraper and evaluator pipeline
+      - name: Run selected JobFinder pipeline
         shell: bash
         run: |
           set -o pipefail
 
           echo "Starting Job Scraper Pipeline at $(date +'%Y-%m-%dT%H:%M:%S%z') (${TZ})"
           echo "Output mode: ${JOBSCRAPER_OUTPUT_MODE}"
+          echo "Pipeline mode: ${JOBSCRAPER_PIPELINE_MODE}"
           echo "Job sources: ${JOBSCRAPER_SOURCES}"
           echo "Scraper timezone: ${JOBSCRAPER_TIMEZONE}"
           echo "Posted timezone: ${JOBSCRAPER_POSTED_TIMEZONE}"
           echo "Search concurrency: ${JOBSCRAPER_SEARCH_CONCURRENCY}"
           echo "Search window buffer: ${JOBSCRAPER_SEARCH_WINDOW_BUFFER_SECONDS}s"
           echo "Apify child run memory: ${APIFY_RUN_MEMORY_MB} MB"
+          echo "Apify child run timeout: ${APIFY_RUN_TIMEOUT_SECONDS}s"
+          echo "Apify HTTP request timeout: ${APIFY_CLIENT_TIMEOUT_SECONDS}s"
           echo "Evaluator model: ${JOB_EVAL_OPENAI_MODEL}"
           echo "Evaluator concurrency: ${JOB_EVAL_CONCURRENCY}"
 
-          python -u run_job_pipeline.py 2>&1 | tee pipeline.log
+          python -u run_job_pipeline.py --mode "${JOBSCRAPER_PIPELINE_MODE}" 2>&1 | tee pipeline.log
           status=${PIPESTATUS[0]}
 
           if [ "$status" -ne 0 ]; then

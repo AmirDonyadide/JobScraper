@@ -28,6 +28,8 @@ from jobscraper.paths import (
 TOKEN_ENV_VAR = "APIFY_API_TOKEN"
 TOKEN_PLACEHOLDER = "apify_api_XXXXXXXXXXXX"
 SPREADSHEET_TITLE = "jobs"
+DEFAULT_APIFY_RUN_TIMEOUT_SECONDS = 1800
+DEFAULT_APIFY_CLIENT_TIMEOUT_SECONDS = 120
 
 LINKEDIN_ACTOR_ID = "curious_coder~linkedin-jobs-scraper"
 INDEED_ACTOR_ID = "misceres~indeed-scraper"
@@ -150,12 +152,15 @@ def load_scraper_settings(env: EnvSettings | None = None) -> ScraperSettings:
     indeed_max_results = env.get_int(
         "INDEED_MAX_RESULTS_PER_SEARCH", max_results_per_search
     )
-    apify_run_timeout_seconds = max(60, env.get_int("APIFY_RUN_TIMEOUT_SECONDS", 300))
+    apify_run_timeout_seconds = max(
+        60,
+        env.get_int("APIFY_RUN_TIMEOUT_SECONDS", DEFAULT_APIFY_RUN_TIMEOUT_SECONDS),
+    )
     apify_client_timeout_seconds = max(
-        apify_run_timeout_seconds + 30,
+        1,
         env.get_int(
             "APIFY_CLIENT_TIMEOUT_SECONDS",
-            apify_run_timeout_seconds + 60,
+            DEFAULT_APIFY_CLIENT_TIMEOUT_SECONDS,
         ),
     )
     location = config_str(filter_config, "linkedin_search", "location", "Germany")

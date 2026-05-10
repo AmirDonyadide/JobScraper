@@ -14,22 +14,59 @@ from jobscraper.scraper.settings import TOKEN_PLACEHOLDER
 
 LOGGER = logging.getLogger("jobscraper.pipeline")
 
+PIPELINE_MODE_SCRAPE_ONLY = "scrape_only"
+PIPELINE_MODE_SCRAPE_AND_EVALUATE = "scrape_and_evaluate"
+DEFAULT_PIPELINE_MODE = PIPELINE_MODE_SCRAPE_AND_EVALUATE
+PIPELINE_MODE_ALIASES = {
+    "scrape": PIPELINE_MODE_SCRAPE_ONLY,
+    "scrape_only": PIPELINE_MODE_SCRAPE_ONLY,
+    "scrape-only": PIPELINE_MODE_SCRAPE_ONLY,
+    "scraper": PIPELINE_MODE_SCRAPE_ONLY,
+    "scraper_only": PIPELINE_MODE_SCRAPE_ONLY,
+    "scraper-only": PIPELINE_MODE_SCRAPE_ONLY,
+    "both": PIPELINE_MODE_SCRAPE_AND_EVALUATE,
+    "full": PIPELINE_MODE_SCRAPE_AND_EVALUATE,
+    "scrape_and_evaluate": PIPELINE_MODE_SCRAPE_AND_EVALUATE,
+    "scrape-and-evaluate": PIPELINE_MODE_SCRAPE_AND_EVALUATE,
+    "scrape_evaluate": PIPELINE_MODE_SCRAPE_AND_EVALUATE,
+    "scrape-evaluate": PIPELINE_MODE_SCRAPE_AND_EVALUATE,
+}
+
 
 def setting(local_env: dict[str, str], name: str, default: str = "") -> str:
     """Read a setting from environment variables with local env fallback."""
     return os.environ.get(name, local_env.get(name, default)).strip()
 
 
-def validate_required_settings(local_env: dict[str, str]) -> None:
-    """Ensure the pipeline has the secrets required by both child steps."""
+def parse_pipeline_mode(value: str | None) -> str:
+    """Resolve user-facing pipeline mode aliases into canonical mode names."""
+    normalized = (value or DEFAULT_PIPELINE_MODE).strip().lower()
+    mode = PIPELINE_MODE_ALIASES.get(normalized)
+    if mode:
+        return mode
+
+    allowed = ", ".join(sorted(PIPELINE_MODE_ALIASES))
+    raise SystemExit(f"Unknown pipeline mode {value!r}. Use one of: {allowed}.")
+
+
+def resolve_pipeline_mode(args: argparse.Namespace, local_env: dict[str, str]) -> str:
+    """Resolve the selected mode from CLI args, env, or the default."""
+    mode_value = args.mode or setting(local_env, "JOBSCRAPER_PIPELINE_MODE")
+    return parse_pipeline_mode(mode_value)
+
+
+def validate_required_settings(local_env: dict[str, str], pipeline_mode: str) -> None:
+    """Ensure the selected pipeline mode has the secrets it needs."""
     apify_token = setting(local_env, "APIFY_API_TOKEN")
-    openai_key = setting(local_env, "OPENAI_API_KEY")
 
     missing = []
     if not apify_token or apify_token == TOKEN_PLACEHOLDER:
         missing.append("APIFY_API_TOKEN")
-    if not openai_key:
-        missing.append("OPENAI_API_KEY")
+
+    if pipeline_mode == PIPELINE_MODE_SCRAPE_AND_EVALUATE:
+        openai_key = setting(local_env, "OPENAI_API_KEY")
+        if not openai_key:
+            missing.append("OPENAI_API_KEY")
 
     if missing:
         names = ", ".join(missing)
@@ -38,8 +75,11 @@ def validate_required_settings(local_env: dict[str, str]) -> None:
         )
 
 
-def validate_python_dependencies() -> None:
-    """Fail early when optional pipeline dependencies are missing."""
+def validate_python_dependencies(pipeline_mode: str) -> None:
+    """Fail early when dependencies for the selected mode are missing."""
+    if pipeline_mode == PIPELINE_MODE_SCRAPE_ONLY:
+        return
+
     missing_packages = []
     try:
         import openai  # noqa: F401
@@ -66,9 +106,17 @@ def build_arg_parser() -> argparse.ArgumentParser:
     """Build the pipeline CLI argument parser."""
     parser = argparse.ArgumentParser(
         description=(
-            "Run the full JobScraper workflow: scrape jobs to Google Sheets, "
-            "then evaluate every unevaluated row with OpenAI."
+            "Run JobScraper: scrape jobs to Google Sheets, optionally followed by "
+            "OpenAI evaluation."
         )
+    )
+    parser.add_argument(
+        "--mode",
+        help=(
+            "Use 'scrape_only' to stop after scraping, or "
+            "'scrape_and_evaluate' to run both steps. Defaults to "
+            "JOBSCRAPER_PIPELINE_MODE or scrape_and_evaluate."
+        ),
     )
     return parser
 
@@ -83,22 +131,24 @@ def child_pythonpath() -> str:
 
 
 def main() -> int:
-    """Run the two-step scraper and evaluator pipeline."""
+    """Run the scraper pipeline in the selected mode."""
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s %(levelname)s %(message)s",
         datefmt="%H:%M:%S",
     )
-    build_arg_parser().parse_args()
+    args = build_arg_parser().parse_args()
     local_env = load_local_env()
-    validate_required_settings(local_env)
-    validate_python_dependencies()
+    pipeline_mode = resolve_pipeline_mode(args, local_env)
+    validate_required_settings(local_env, pipeline_mode)
+    validate_python_dependencies(pipeline_mode)
 
     env = os.environ.copy()
     for key, value in local_env.items():
         env.setdefault(key, value)
     env["PYTHONPATH"] = child_pythonpath()
     env["JOBSCRAPER_OUTPUT_MODE"] = "google_sheets"
+    env["JOBSCRAPER_PIPELINE_MODE"] = pipeline_mode
 
     scrape_command = [sys.executable, "-m", "jobscraper.scraper.cli"]
     evaluate_command = [
@@ -110,6 +160,11 @@ def main() -> int:
         "--sheet",
         "latest",
     ]
+
+    if pipeline_mode == PIPELINE_MODE_SCRAPE_ONLY:
+        run_step(scrape_command, env, "Step 1/1: Scraping jobs to Google Sheets")
+        LOGGER.info("Scrape-only pipeline complete. Evaluation was skipped.")
+        return 0
 
     run_step(scrape_command, env, "Step 1/2: Scraping jobs to Google Sheets")
     run_step(evaluate_command, env, "Step 2/2: Evaluating jobs with OpenAI")

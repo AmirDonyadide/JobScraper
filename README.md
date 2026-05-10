@@ -121,9 +121,12 @@ Common settings:
 |---|---:|---|
 | `JOBSCRAPER_SOURCES` | `linkedin` | Use `linkedin`, `indeed`, or `both`. |
 | `JOBSCRAPER_OUTPUT_MODE` | `excel` | Use `excel`, `google_sheets`, or `both`. The full pipeline forces Google Sheets. |
+| `JOBSCRAPER_PIPELINE_MODE` | `scrape_and_evaluate` | For `run_job_pipeline.py`, use `scrape_only` or `scrape_and_evaluate`. |
 | `JOBSCRAPER_SEARCH_CONCURRENCY` | `15` | Number of Apify searches run at the same time. |
 | `JOBSCRAPER_MAX_RESULTS_PER_SEARCH` | `500` | Maximum LinkedIn results per keyword. |
 | `JOBSCRAPER_SEARCH_WINDOW_BUFFER_SECONDS` | `3600` | Extra search-window padding before exact posted-time filtering, to avoid missing jobs while the run is starting. |
+| `APIFY_RUN_TIMEOUT_SECONDS` | `1800` | Maximum Apify actor runtime per keyword search. |
+| `APIFY_CLIENT_TIMEOUT_SECONDS` | `120` | HTTP timeout for individual Apify API calls while starting, polling, and reading results. |
 | `JOBSCRAPER_TIMEZONE` | `Europe/Berlin` | Timezone for terminal logs and new Excel/Google Sheets tab names. |
 | `JOBSCRAPER_POSTED_TIMEZONE` | `Europe/Berlin` | Timezone for the `Posted` column. |
 | `JOB_EVAL_OPENAI_MODEL` | `gpt-5-mini` | OpenAI model used for evaluation. |
@@ -285,9 +288,14 @@ Choose the source:
 - `indeed`
 - `both`
 
+Choose the pipeline mode:
+
+- `scrape_and_evaluate`: scrape jobs, then evaluate them with OpenAI
+- `scrape_only`: create the new scraped Google Sheet tab without running OpenAI evaluation
+
 Click **Run workflow**.
 
-The workflow will create a new dated tab in your Google Sheet and then evaluate the jobs.
+The workflow will create a new dated tab in your Google Sheet. In `scrape_and_evaluate` mode, it then evaluates the jobs.
 
 ### 6. Scheduled Runs
 
@@ -307,13 +315,15 @@ GitHub may delay scheduled workflows slightly. That is normal.
 The current workflow uses:
 
 ```yaml
+APIFY_RUN_TIMEOUT_SECONDS: "1800"
+APIFY_CLIENT_TIMEOUT_SECONDS: "120"
 JOB_EVAL_CONCURRENCY: "8"
 JOB_EVAL_BATCH_SIZE: "40"
 JOB_EVAL_LARGE_QUEUE_THRESHOLD: "200"
 JOB_EVAL_LARGE_QUEUE_SLEEP_MS: "2000"
 ```
 
-This means up to 8 OpenAI requests can run at the same time, with jobs grouped locally in batches of 40.
+This gives each Apify keyword search up to 30 minutes of actor runtime. The scraper starts Apify runs asynchronously and polls them, so long keyword searches are not limited by Apify's 300-second synchronous endpoint. The evaluator allows up to 8 OpenAI requests at the same time, with jobs grouped locally in batches of 40.
 
 When more than 200 rows are queued, the evaluator also spaces OpenAI request starts by 2000 ms. Each row is saved back to the same sheet immediately after it is evaluated, so a later failure keeps the completed rows.
 
@@ -338,6 +348,12 @@ Full Google Sheets pipeline:
 
 ```bash
 python run_job_pipeline.py
+```
+
+Scrape to Google Sheets without evaluation:
+
+```bash
+python run_job_pipeline.py --mode scrape_only
 ```
 
 Scrape only:
