@@ -1,6 +1,6 @@
 -r requirements.txt
 
 black>=25.1,<26
-mypy>=1.17,<2
+mypy>=2.1.0,<3
 pytest>=8.0,<9
 ruff>=0.12,<1
