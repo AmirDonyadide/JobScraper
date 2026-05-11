@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
-from jobscraper.evaluator.models import OUTPUT_COLUMNS
-from jobscraper.evaluator.parsing import (
+from jobfinder.evaluator.models import OUTPUT_COLUMNS
+from jobfinder.evaluator.parsing import (
     ensure_output_columns,
     extract_job_records,
     parse_model_response,
     row_to_job_advertisement,
 )
-from jobscraper.evaluator.storage import columns_to_remove_after_evaluation
+from jobfinder.evaluator.storage import columns_to_remove_after_evaluation
 
 
 def test_ensure_output_columns_appends_missing_ai_columns():

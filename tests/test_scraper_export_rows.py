@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from jobscraper.evaluator.models import OUTPUT_COLUMNS
-from jobscraper.scraper.export_rows import HEADER, make_job_rows
+from jobfinder.evaluator.models import OUTPUT_COLUMNS
+from jobfinder.scraper.export_rows import HEADER, make_job_rows
 
 
 class MinimalSettings:

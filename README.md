@@ -43,7 +43,7 @@ JobFinder/
 ├── prompts/
 │   ├── master_prompt.example.txt
 │   └── master_prompt.txt         # private, ignored by Git
-├── src/jobscraper/
+├── src/jobfinder/
 │   ├── scraper/                  # scraping, filtering, exporting
 │   ├── evaluator/                # OpenAI evaluation and sheet updates
 │   └── pipeline/                 # full workflow entry point
@@ -55,7 +55,7 @@ JobFinder/
 └── README.md
 ```
 
-The Python package is still named `jobscraper` internally. The product/repository name is JobFinder.
+The Python package is named `jobfinder` internally. The scraper component remains under `jobfinder.scraper`.
 
 ## Local Installation
 
@@ -65,8 +65,8 @@ With Conda:
 
 ```bash
 cd /Users/amir/Documents/GitHub/JobFinder
-conda create -n jobscraper python=3.11 -y
-conda activate jobscraper
+conda create -n jobfinder python=3.11 -y
+conda activate jobfinder
 python -m pip install -r requirements.txt
 cp .env.example .env
 ```
@@ -121,7 +121,7 @@ Common settings:
 |---|---:|---|
 | `JOBSCRAPER_SOURCES` | `linkedin` | Use `linkedin`, `indeed`, or `both`. |
 | `JOBSCRAPER_OUTPUT_MODE` | `excel` | Use `excel`, `google_sheets`, or `both`. The full pipeline forces Google Sheets. |
-| `JOBSCRAPER_PIPELINE_MODE` | `scrape_and_evaluate` | For `run_job_pipeline.py`, use `scrape_only` or `scrape_and_evaluate`. |
+| `JOBFINDER_PIPELINE_MODE` | `scrape_and_evaluate` | For `run_job_pipeline.py`, use `scrape_only` or `scrape_and_evaluate`. |
 | `JOBSCRAPER_SEARCH_CONCURRENCY` | `15` | Number of Apify searches run at the same time. |
 | `JOBSCRAPER_MAX_RESULTS_PER_SEARCH` | `500` | Maximum LinkedIn results per keyword. |
 | `JOBSCRAPER_SEARCH_WINDOW_BUFFER_SECONDS` | `3600` | Extra search-window padding before exact posted-time filtering, to avoid missing jobs while the run is starting. |
@@ -281,7 +281,7 @@ Paste each copied value into the matching GitHub secret.
 In GitHub:
 
 ```text
-Repository -> Actions -> Job Scraper Pipeline -> Run workflow
+Repository -> Actions -> JobFinder Pipeline -> Run workflow
 ```
 
 Choose the source:

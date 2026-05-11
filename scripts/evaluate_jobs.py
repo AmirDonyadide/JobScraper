@@ -1,4 +1,4 @@
-"""Run the JobScraper evaluator CLI from the scripts directory."""
+"""Run the JobFinder evaluator CLI from the scripts directory."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from jobscraper.evaluator.cli import main  # noqa: E402
+from jobfinder.evaluator.cli import main  # noqa: E402
 
 if __name__ == "__main__":
     sys.exit(main())

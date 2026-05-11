@@ -7,7 +7,7 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from jobscraper.paths import FILTERS_FILE, KEYWORDS_FILE
+from jobfinder.paths import FILTERS_FILE, KEYWORDS_FILE
 
 LOGGER = logging.getLogger(__name__)
 

@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from jobscraper.evaluator.models import OUTPUT_COLUMNS
-from jobscraper.scraper.normalize import (
+from jobfinder.evaluator.models import OUTPUT_COLUMNS
+from jobfinder.scraper.normalize import (
     get_applicants,
     get_apply_url,
     get_company,
@@ -17,7 +17,7 @@ from jobscraper.scraper.normalize import (
     get_source_label,
     get_title,
 )
-from jobscraper.scraper.settings import ScraperSettings
+from jobfinder.scraper.settings import ScraperSettings
 
 HEADER = [
     "Application Status",

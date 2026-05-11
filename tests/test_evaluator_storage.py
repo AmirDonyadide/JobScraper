@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import openpyxl
 
-from jobscraper.evaluator.models import JobEvaluation
-from jobscraper.evaluator.parsing import ensure_output_columns
-from jobscraper.evaluator.storage import write_excel_output
+from jobfinder.evaluator.models import JobEvaluation
+from jobfinder.evaluator.parsing import ensure_output_columns
+from jobfinder.evaluator.storage import write_excel_output
 
 
 def test_write_excel_output_can_skip_cleanup_for_incremental_save(tmp_path):

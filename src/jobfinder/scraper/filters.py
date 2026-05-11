@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from jobscraper.scraper.normalize import get_applicant_count, get_company, get_title
-from jobscraper.scraper.settings import ScraperSettings
+from jobfinder.scraper.normalize import get_applicant_count, get_company, get_title
+from jobfinder.scraper.settings import ScraperSettings
 
 
 def normalize_filter_text(value: str) -> str:

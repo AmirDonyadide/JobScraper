@@ -10,8 +10,8 @@ from typing import Any
 from urllib.parse import parse_qs, urlparse
 from zoneinfo import ZoneInfo
 
-from jobscraper.google_sheets import quote_sheet_name
-from jobscraper.scraper.normalize import (
+from jobfinder.google_sheets import quote_sheet_name
+from jobfinder.scraper.normalize import (
     get_company,
     get_job_url,
     get_location,
@@ -19,7 +19,7 @@ from jobscraper.scraper.normalize import (
     get_source_label,
     get_title,
 )
-from jobscraper.scraper.settings import ScraperSettings
+from jobfinder.scraper.settings import ScraperSettings
 
 RUN_SHEET_NAME_RE = re.compile(
     r"^(?P<timestamp>\d{4}-\d{2}-\d{2} \d{2}-\d{2}-\d{2})(?: \(\d+\))?$"
@@ -373,7 +373,7 @@ def load_google_spreadsheet_context(
     service: Any,
 ) -> GoogleSpreadsheetContext:
     """Load existing run metadata and duplicate keys from Google Sheets."""
-    from jobscraper.scraper.export_google_sheets import (
+    from jobfinder.scraper.export_google_sheets import (
         GoogleSheetsExportError,
         get_google_spreadsheet,
         read_google_spreadsheet_id,

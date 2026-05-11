@@ -8,11 +8,11 @@ import os
 import subprocess
 import sys
 
-from jobscraper.env import load_local_env
-from jobscraper.paths import ENV_FILE, PROJECT_ROOT
-from jobscraper.scraper.settings import TOKEN_PLACEHOLDER
+from jobfinder.env import load_local_env
+from jobfinder.paths import ENV_FILE, PROJECT_ROOT
+from jobfinder.scraper.settings import TOKEN_PLACEHOLDER
 
-LOGGER = logging.getLogger("jobscraper.pipeline")
+LOGGER = logging.getLogger("jobfinder.pipeline")
 
 PIPELINE_MODE_SCRAPE_ONLY = "scrape_only"
 PIPELINE_MODE_SCRAPE_AND_EVALUATE = "scrape_and_evaluate"
@@ -51,7 +51,7 @@ def parse_pipeline_mode(value: str | None) -> str:
 
 def resolve_pipeline_mode(args: argparse.Namespace, local_env: dict[str, str]) -> str:
     """Resolve the selected mode from CLI args, env, or the default."""
-    mode_value = args.mode or setting(local_env, "JOBSCRAPER_PIPELINE_MODE")
+    mode_value = args.mode or setting(local_env, "JOBFINDER_PIPELINE_MODE")
     return parse_pipeline_mode(mode_value)
 
 
@@ -106,7 +106,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     """Build the pipeline CLI argument parser."""
     parser = argparse.ArgumentParser(
         description=(
-            "Run JobScraper: scrape jobs to Google Sheets, optionally followed by "
+            "Run JobFinder: scrape jobs to Google Sheets, optionally followed by "
             "OpenAI evaluation."
         )
     )
@@ -115,7 +115,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
         help=(
             "Use 'scrape_only' to stop after scraping, or "
             "'scrape_and_evaluate' to run both steps. Defaults to "
-            "JOBSCRAPER_PIPELINE_MODE or scrape_and_evaluate."
+            "JOBFINDER_PIPELINE_MODE or scrape_and_evaluate."
         ),
     )
     return parser
@@ -148,13 +148,13 @@ def main() -> int:
         env.setdefault(key, value)
     env["PYTHONPATH"] = child_pythonpath()
     env["JOBSCRAPER_OUTPUT_MODE"] = "google_sheets"
-    env["JOBSCRAPER_PIPELINE_MODE"] = pipeline_mode
+    env["JOBFINDER_PIPELINE_MODE"] = pipeline_mode
 
-    scrape_command = [sys.executable, "-m", "jobscraper.scraper.cli"]
+    scrape_command = [sys.executable, "-m", "jobfinder.scraper.cli"]
     evaluate_command = [
         sys.executable,
         "-m",
-        "jobscraper.evaluator.cli",
+        "jobfinder.evaluator.cli",
         "--source",
         "google_sheets",
         "--sheet",

@@ -1,4 +1,4 @@
-"""Project path constants used by the JobScraper package."""
+"""Project path constants used by the JobFinder package."""
 
 from __future__ import annotations
 

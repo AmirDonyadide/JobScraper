@@ -8,8 +8,8 @@ import re
 from datetime import UTC, datetime
 from typing import Any
 
-from jobscraper.scraper.search import indeed_base_url
-from jobscraper.scraper.settings import ScraperSettings
+from jobfinder.scraper.search import indeed_base_url
+from jobfinder.scraper.settings import ScraperSettings
 
 APPLICANT_COUNT_KEYS = (
     "applicantsCount",

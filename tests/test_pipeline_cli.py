@@ -6,7 +6,7 @@ import argparse
 
 import pytest
 
-from jobscraper.pipeline.cli import (
+from jobfinder.pipeline.cli import (
     PIPELINE_MODE_SCRAPE_AND_EVALUATE,
     PIPELINE_MODE_SCRAPE_ONLY,
     parse_pipeline_mode,
@@ -31,7 +31,7 @@ def test_resolve_pipeline_mode_prefers_cli_over_env():
 
     mode = resolve_pipeline_mode(
         args,
-        {"JOBSCRAPER_PIPELINE_MODE": "scrape_and_evaluate"},
+        {"JOBFINDER_PIPELINE_MODE": "scrape_and_evaluate"},
     )
 
     assert mode == PIPELINE_MODE_SCRAPE_ONLY

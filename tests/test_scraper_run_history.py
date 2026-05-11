@@ -6,15 +6,15 @@ from datetime import UTC, datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from jobscraper.env import EnvSettings
-from jobscraper.scraper.run_history import (
+from jobfinder.env import EnvSettings
+from jobfinder.scraper.run_history import (
     apply_previous_run_search_window,
     filter_jobs_to_previous_run_window,
     find_previous_run_started_at,
     job_identity_keys_from_values,
     remove_jobs_seen_in_history,
 )
-from jobscraper.scraper.settings import ScraperSettings
+from jobfinder.scraper.settings import ScraperSettings
 
 
 def make_settings(run_started_at: datetime) -> ScraperSettings:

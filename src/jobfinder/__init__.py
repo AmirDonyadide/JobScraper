@@ -1,4 +1,4 @@
-"""JobScraper package.
+"""JobFinder package.
 
 The package contains the scraping, exporting, evaluation, and pipeline entry
 points used by the thin compatibility scripts in the repository root.

@@ -10,13 +10,13 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import UTC, datetime
 from threading import Lock
 
-from jobscraper.evaluator.models import (
+from jobfinder.evaluator.models import (
     EvaluationError,
     JobEvaluation,
     JobRecord,
     OpenAIQuotaError,
 )
-from jobscraper.evaluator.parsing import (
+from jobfinder.evaluator.parsing import (
     build_full_prompt,
     get_response_text,
     parse_model_response,

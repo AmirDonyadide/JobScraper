@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from jobscraper.config_files import (
+from jobfinder.config_files import (
     ConfigFileError,
     config_int,
     config_list,

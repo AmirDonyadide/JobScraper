@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from jobscraper.scraper.filters import filter_excluded_companies
+from jobfinder.scraper.filters import filter_excluded_companies
 
 
 def test_filter_excluded_companies_matches_case_insensitive_substrings():

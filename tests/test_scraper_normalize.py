@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from jobscraper.scraper.normalize import (
+from jobfinder.scraper.normalize import (
     clean_job_description,
     merge_and_deduplicate,
     parse_applicant_count_value,

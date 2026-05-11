@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from jobscraper.config_files import (
+from jobfinder.config_files import (
     ConfigFileError,
     config_int,
     config_list,
@@ -16,8 +16,8 @@ from jobscraper.config_files import (
     load_filter_config,
     load_keywords,
 )
-from jobscraper.env import EnvSettings
-from jobscraper.paths import (
+from jobfinder.env import EnvSettings
+from jobfinder.paths import (
     DEFAULT_EXCEL_FILE,
     ENV_FILE,
     FILTERS_FILE,

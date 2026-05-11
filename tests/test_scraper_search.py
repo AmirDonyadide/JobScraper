@@ -8,7 +8,7 @@ from typing import Any
 import pytest
 import requests
 
-from jobscraper.scraper.search import (
+from jobfinder.scraper.search import (
     ApifyRunTimeoutError,
     SearchExecutionError,
     SearchRequest,
@@ -72,8 +72,8 @@ def test_run_actor_uses_async_api_and_fetches_dataset(monkeypatch):
             )
         return FakeResponse([{"title": "GIS Analyst"}])
 
-    monkeypatch.setattr("jobscraper.scraper.search.requests.post", fake_post)
-    monkeypatch.setattr("jobscraper.scraper.search.requests.get", fake_get)
+    monkeypatch.setattr("jobfinder.scraper.search.requests.post", fake_post)
+    monkeypatch.setattr("jobfinder.scraper.search.requests.get", fake_get)
 
     jobs = run_actor(settings, "owner~actor", {"input": True}, 500)
 
@@ -101,8 +101,8 @@ def test_run_actor_reports_apify_timed_out_status(monkeypatch):
     def fake_get(url: str, **kwargs: Any) -> FakeResponse:
         return FakeResponse({"data": {"id": "run-1", "status": "TIMED-OUT"}})
 
-    monkeypatch.setattr("jobscraper.scraper.search.requests.post", fake_post)
-    monkeypatch.setattr("jobscraper.scraper.search.requests.get", fake_get)
+    monkeypatch.setattr("jobfinder.scraper.search.requests.post", fake_post)
+    monkeypatch.setattr("jobfinder.scraper.search.requests.get", fake_get)
 
     with pytest.raises(ApifyRunTimeoutError):
         run_actor(settings, "owner~actor", {"input": True}, 500)
@@ -135,8 +135,8 @@ def test_fetch_jobs_for_search_retries_temporary_apify_http_errors(monkeypatch):
             )
         return FakeResponse([{"title": "GIS Analyst"}])
 
-    monkeypatch.setattr("jobscraper.scraper.search.requests.post", fake_post)
-    monkeypatch.setattr("jobscraper.scraper.search.requests.get", fake_get)
+    monkeypatch.setattr("jobfinder.scraper.search.requests.post", fake_post)
+    monkeypatch.setattr("jobfinder.scraper.search.requests.get", fake_get)
 
     jobs = fetch_jobs_for_search(
         settings,
@@ -165,7 +165,7 @@ def test_fetch_jobs_for_search_fails_after_retry_budget(monkeypatch):
     def fake_post(url: str, **kwargs: Any) -> FakeResponse:
         return FakeResponse("<h1>Bad Gateway</h1>", status_code=502)
 
-    monkeypatch.setattr("jobscraper.scraper.search.requests.post", fake_post)
+    monkeypatch.setattr("jobfinder.scraper.search.requests.post", fake_post)
 
     with pytest.raises(SearchExecutionError):
         fetch_jobs_for_search(

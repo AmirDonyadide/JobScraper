@@ -8,7 +8,7 @@ from typing import Any
 import openpyxl
 from openpyxl.utils import get_column_letter
 
-from jobscraper.evaluator.models import (
+from jobfinder.evaluator.models import (
     DETAIL_COLUMNS,
     OUTPUT_COLUMNS,
     REMOVED_AI_OUTPUT_COLUMNS,
@@ -16,9 +16,9 @@ from jobscraper.evaluator.models import (
     GoogleSheetsError,
     JobEvaluation,
 )
-from jobscraper.evaluator.parsing import normalize_header, trim_trailing_blank_headers
-from jobscraper.google_sheets import build_google_sheets_service, quote_sheet_name
-from jobscraper.paths import GOOGLE_SPREADSHEET_ID_FILE
+from jobfinder.evaluator.parsing import normalize_header, trim_trailing_blank_headers
+from jobfinder.google_sheets import build_google_sheets_service, quote_sheet_name
+from jobfinder.paths import GOOGLE_SPREADSHEET_ID_FILE
 
 
 def resolve_sheet_name(existing_names: list[str], requested: str) -> str:
@@ -121,7 +121,7 @@ def read_google_spreadsheet_id(cli_value: str) -> str:
     if cli_value:
         return cli_value
 
-    from jobscraper.env import EnvSettings
+    from jobfinder.env import EnvSettings
 
     env_value = EnvSettings().get("GOOGLE_SPREADSHEET_ID")
     if env_value:

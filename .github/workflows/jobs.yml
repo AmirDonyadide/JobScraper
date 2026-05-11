@@ -1,4 +1,4 @@
-name: Job Scraper Pipeline
+name: JobFinder Pipeline
 
 on:
   workflow_dispatch:
@@ -30,7 +30,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: linkedin-job-scraper
+  group: jobfinder-pipeline
   cancel-in-progress: false
 
 jobs:
@@ -49,7 +49,7 @@ jobs:
       MASTER_CV_TEX: ${{ secrets.MASTER_CV_TEX }}
       JOBSCRAPER_OUTPUT_MODE: "google_sheets"
       JOBSCRAPER_SOURCES: ${{ github.event.inputs.sources || 'linkedin' }}
-      JOBSCRAPER_PIPELINE_MODE: ${{ github.event.inputs.run_mode || 'scrape_and_evaluate' }}
+      JOBFINDER_PIPELINE_MODE: ${{ github.event.inputs.run_mode || 'scrape_and_evaluate' }}
       JOBSCRAPER_SEARCH_CONCURRENCY: "15"
       JOBSCRAPER_SEARCH_WINDOW_BUFFER_SECONDS: "3600"
       APIFY_RUN_MEMORY_MB: "512"
@@ -99,7 +99,7 @@ jobs:
           fi
 
           should_evaluate=1
-          if [ "${JOBSCRAPER_PIPELINE_MODE}" = "scrape_only" ]; then
+          if [ "${JOBFINDER_PIPELINE_MODE}" = "scrape_only" ]; then
             should_evaluate=0
           fi
 
@@ -150,7 +150,7 @@ jobs:
               Path("configs/keywords.txt"): os.environ["JOB_KEYWORDS_TEXT"],
           }
 
-          if os.environ["JOBSCRAPER_PIPELINE_MODE"] != "scrape_only":
+          if os.environ["JOBFINDER_PIPELINE_MODE"] != "scrape_only":
               private_files.update(
                   {
                       Path("prompts/master_prompt.txt"): os.environ["MASTER_PROMPT_TEXT"],
@@ -207,9 +207,9 @@ jobs:
         run: |
           set -o pipefail
 
-          echo "Starting Job Scraper Pipeline at $(date +'%Y-%m-%dT%H:%M:%S%z') (${TZ})"
+          echo "Starting JobFinder Pipeline at $(date +'%Y-%m-%dT%H:%M:%S%z') (${TZ})"
           echo "Output mode: ${JOBSCRAPER_OUTPUT_MODE}"
-          echo "Pipeline mode: ${JOBSCRAPER_PIPELINE_MODE}"
+          echo "Pipeline mode: ${JOBFINDER_PIPELINE_MODE}"
           echo "Job sources: ${JOBSCRAPER_SOURCES}"
           echo "Scraper timezone: ${JOBSCRAPER_TIMEZONE}"
           echo "Posted timezone: ${JOBSCRAPER_POSTED_TIMEZONE}"
@@ -223,7 +223,7 @@ jobs:
           echo "Evaluator model: ${JOB_EVAL_OPENAI_MODEL}"
           echo "Evaluator concurrency: ${JOB_EVAL_CONCURRENCY}"
 
-          python -u run_job_pipeline.py --mode "${JOBSCRAPER_PIPELINE_MODE}" 2>&1 | tee pipeline.log
+          python -u run_job_pipeline.py --mode "${JOBFINDER_PIPELINE_MODE}" 2>&1 | tee pipeline.log
           status=${PIPESTATUS[0]}
 
           if [ "$status" -ne 0 ]; then

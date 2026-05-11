@@ -1,6 +1,6 @@
 """Compatibility imports for the refactored config helpers.
 
-New code should import from ``jobscraper.config_files``. This module exists so
+New code should import from ``jobfinder.config_files``. This module exists so
 older local snippets that import ``job_scraper_config`` keep working.
 """
 
@@ -11,7 +11,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "src"))
 
-from jobscraper.config_files import (  # noqa: E402,F401
+from jobfinder.config_files import (  # noqa: E402,F401
     ConfigFileError,
     config_int,
     config_list,

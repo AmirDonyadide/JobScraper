@@ -8,19 +8,19 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from jobscraper.env import EnvSettings
-from jobscraper.evaluator.models import (
+from jobfinder.env import EnvSettings
+from jobfinder.evaluator.models import (
     DEFAULT_MODEL,
     EvaluationError,
     GoogleSheetsError,
 )
-from jobscraper.evaluator.openai_client import OpenAIJobEvaluator, evaluate_records
-from jobscraper.evaluator.parsing import (
+from jobfinder.evaluator.openai_client import OpenAIJobEvaluator, evaluate_records
+from jobfinder.evaluator.parsing import (
     ensure_output_columns,
     extract_job_records,
     read_text_asset,
 )
-from jobscraper.evaluator.storage import (
+from jobfinder.evaluator.storage import (
     build_evaluator_google_sheets_service,
     read_excel_input,
     read_google_input,
@@ -28,7 +28,7 @@ from jobscraper.evaluator.storage import (
     write_excel_output,
     write_google_output,
 )
-from jobscraper.paths import (
+from jobfinder.paths import (
     DEFAULT_CV_FILE,
     DEFAULT_EXCEL_FILE,
     DEFAULT_MASTER_PROMPT_FILE,

@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from jobscraper.paths import (
+from jobfinder.paths import (
     GOOGLE_CLIENT_SECRET_FILE,
     GOOGLE_SERVICE_ACCOUNT_FILE,
     GOOGLE_TOKEN_FILE,

@@ -1,6 +1,6 @@
 # Contributing
 
-Thanks for improving JobScraper. Keep changes small and easy to reason about; this project is meant to stay simple enough that someone can read it in one sitting.
+Thanks for improving JobFinder. Keep changes small and easy to reason about; this project is meant to stay simple enough that someone can read it in one sitting.
 
 ## Local Setup
 

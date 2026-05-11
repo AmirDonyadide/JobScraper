@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from typing import Any
 
-from jobscraper.google_sheets import build_google_sheets_service, quote_sheet_name
-from jobscraper.scraper.export_rows import HEADER, make_job_rows, unique_name
-from jobscraper.scraper.settings import SPREADSHEET_TITLE, ScraperSettings
+from jobfinder.google_sheets import build_google_sheets_service, quote_sheet_name
+from jobfinder.scraper.export_rows import HEADER, make_job_rows, unique_name
+from jobfinder.scraper.settings import SPREADSHEET_TITLE, ScraperSettings
 
 
 class GoogleSheetsExportError(RuntimeError):

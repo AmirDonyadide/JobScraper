@@ -8,7 +8,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from jobscraper.evaluator.models import (
+from jobfinder.evaluator.models import (
     AI_OUTPUT_COLUMNS,
     OUTPUT_COLUMNS,
     UNHELPFUL_COLUMNS,

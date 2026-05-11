@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from jobscraper.evaluator.models import JobEvaluation, JobRecord
-from jobscraper.evaluator.openai_client import RequestPacer, evaluate_records
+from jobfinder.evaluator.models import JobEvaluation, JobRecord
+from jobfinder.evaluator.openai_client import RequestPacer, evaluate_records
 
 
 class FakeEvaluator:

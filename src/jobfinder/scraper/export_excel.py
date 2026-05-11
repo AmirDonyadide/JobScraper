@@ -9,8 +9,8 @@ import openpyxl
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
-from jobscraper.scraper.export_rows import HEADER, make_job_rows, unique_name
-from jobscraper.scraper.settings import ScraperSettings
+from jobfinder.scraper.export_rows import HEADER, make_job_rows, unique_name
+from jobfinder.scraper.settings import ScraperSettings
 
 COLOR_HEADER_BG = "102C53"
 COLOR_HEADER_FG = "FFFFFF"

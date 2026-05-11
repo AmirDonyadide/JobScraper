@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from jobscraper.google_sheets import build_google_sheets_service
+from jobfinder.google_sheets import build_google_sheets_service
 
 
 def install_fake_google_modules(

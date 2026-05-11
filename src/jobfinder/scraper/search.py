@@ -11,14 +11,14 @@ from urllib.parse import urlencode
 
 import requests
 
-from jobscraper.scraper.settings import (
+from jobfinder.scraper.settings import (
     SOURCE_ALIASES,
     SOURCE_ORDER,
     ScraperSettings,
     source_label,
 )
 
-LOGGER = logging.getLogger("jobscraper.scraper")
+LOGGER = logging.getLogger("jobfinder.scraper")
 APIFY_POLL_INTERVAL_SECONDS = 15
 APIFY_TERMINAL_STATUSES = {"SUCCEEDED", "FAILED", "ABORTED", "TIMED-OUT"}
 RETRYABLE_APIFY_HTTP_STATUS_CODES = {408, 429, 500, 502, 503, 504}

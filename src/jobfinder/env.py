@@ -7,7 +7,7 @@ import os
 from collections.abc import Mapping
 from pathlib import Path
 
-from jobscraper.paths import ENV_FILE
+from jobfinder.paths import ENV_FILE
 
 
 def load_local_env(path: Path = ENV_FILE) -> dict[str, str]:

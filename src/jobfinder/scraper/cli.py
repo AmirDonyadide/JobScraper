@@ -7,27 +7,27 @@ import sys
 import time
 from typing import Any
 
-from jobscraper.scraper.export_excel import export_to_excel
-from jobscraper.scraper.export_google_sheets import (
+from jobfinder.scraper.export_excel import export_to_excel
+from jobfinder.scraper.export_google_sheets import (
     GoogleSheetsExportError,
     build_scraper_google_sheets_service,
     export_to_google_sheets,
 )
-from jobscraper.scraper.filters import (
+from jobfinder.scraper.filters import (
     filter_applicant_count,
     filter_excluded_companies,
     filter_excluded_titles,
 )
-from jobscraper.scraper.normalize import get_posted, merge_and_deduplicate
-from jobscraper.scraper.run_history import (
+from jobfinder.scraper.normalize import get_posted, merge_and_deduplicate
+from jobfinder.scraper.run_history import (
     GoogleSpreadsheetContext,
     apply_previous_run_search_window,
     filter_jobs_to_previous_run_window,
     load_google_spreadsheet_context,
     remove_jobs_seen_in_history,
 )
-from jobscraper.scraper.search import get_searches, parse_job_sources, run_all_searches
-from jobscraper.scraper.settings import (
+from jobfinder.scraper.search import get_searches, parse_job_sources, run_all_searches
+from jobfinder.scraper.settings import (
     OUTPUT_MODE_ALIASES,
     TOKEN_ENV_VAR,
     TOKEN_PLACEHOLDER,
@@ -36,7 +36,7 @@ from jobscraper.scraper.settings import (
     source_label,
 )
 
-LOGGER = logging.getLogger("jobscraper.scraper")
+LOGGER = logging.getLogger("jobfinder.scraper")
 
 
 def parse_output_mode(settings: ScraperSettings) -> set[str]:
@@ -128,7 +128,7 @@ def main() -> int:
         return 1
 
     LOGGER.info(
-        "Job Scraper started at %s.",
+        "JobScraper started at %s.",
         settings.run_started_at.strftime("%Y-%m-%d %H:%M %Z"),
     )
     LOGGER.info(

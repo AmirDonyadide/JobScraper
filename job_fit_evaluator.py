@@ -1,6 +1,6 @@
-"""Compatibility wrapper for the JobScraper evaluator CLI.
+"""Compatibility wrapper for the JobFinder evaluator CLI.
 
-The evaluator implementation lives in ``src/jobscraper/evaluator``. This
+The evaluator implementation lives in ``src/jobfinder/evaluator``. This
 wrapper preserves the historical command:
 
     python job_fit_evaluator.py
@@ -13,7 +13,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "src"))
 
-from jobscraper.evaluator.cli import main  # noqa: E402
+from jobfinder.evaluator.cli import main  # noqa: E402
 
 if __name__ == "__main__":
     sys.exit(main())
