@@ -41,7 +41,11 @@ def apify_error_message(response: requests.Response) -> str:
     try:
         data = response.json()
     except ValueError:
-        return response.text.strip()[:500] or response.reason
+        return (
+            response.text.strip()[:500]
+            or response.reason
+            or f"HTTP {response.status_code}"
+        )
 
     if isinstance(data, dict):
         error = data.get("error")
@@ -183,7 +187,10 @@ def fetch_dataset_items(
 ) -> list[dict[str, Any]]:
     """Fetch JSON items from an Apify dataset."""
     url = f"https://api.apify.com/v2/datasets/{dataset_id}/items"
-    params = {"format": "json", "limit": max_items}
+    params: tuple[tuple[str, str | int], ...] = (
+        ("format", "json"),
+        ("limit", max_items),
+    )
     response = requests.get(
         url,
         params=params,

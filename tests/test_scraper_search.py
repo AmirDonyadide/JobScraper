@@ -99,7 +99,7 @@ def test_run_actor_uses_async_api_and_fetches_dataset(monkeypatch):
     assert calls[2] == (
         "GET",
         "https://api.apify.com/v2/datasets/dataset-1/items",
-        {"format": "json", "limit": 500},
+        (("format", "json"), ("limit", 500)),
     )
     assert apify_http_timeout(settings) == 120
 
