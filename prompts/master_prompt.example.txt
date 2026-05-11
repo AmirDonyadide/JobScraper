@@ -13,6 +13,28 @@ Your first three lines must be exactly:
 
 Verdict: <Suitable | Not Suitable>
 Fit Score: <integer>%
-Unsuitable Reasons: <concise rejection reasons when Not Suitable, otherwise blank>
+Unsuitable Reasons: <category labels only when Not Suitable, otherwise blank>
+
+For `Unsuitable Reasons`, do not write explanatory sentences. Use only one or
+more short labels separated by semicolons, for example:
+
+Language proficiency mismatch; Degree mismatch; Seniority mismatch
+
+Allowed labels include:
+
+- Language proficiency mismatch
+- Degree mismatch
+- Seniority mismatch
+- Missing mandatory certification/license
+- Missing required professional experience
+- Missing required tool/software experience
+- Missing required domain/industry experience
+- Must-have skill mismatch
+- Leadership/management mismatch
+- Role type mismatch
+- Location/relocation mismatch
+- Work authorization/clearance mismatch
+- Physical/medical/safety requirement mismatch
+- Other mandatory requirement mismatch
 
 After those three lines, include any private reasoning or tailored CV content your workflow needs.

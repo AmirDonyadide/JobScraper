@@ -30,13 +30,22 @@ For this automation pipeline, the first three output lines must be machine-reada
 
 Verdict: <Suitable | Not Suitable>
 Fit Score: <integer>%
-Unsuitable Reasons: <concise rejection reasons when Not Suitable, otherwise blank>
+Unsuitable Reasons: <category labels only when Not Suitable, otherwise blank>
 
 Use "Suitable" only for realistically suitable roles. Use "Not Suitable" for
 roles that should be skipped, are unrealistic, or are only borderline. For Not
-Suitable roles, list the concrete reasons in Unsuitable Reasons. After those
-three lines, include any additional reason text and, if required by the MASTER
-PROMPT, the tailored LaTeX CV.
+Suitable roles, Unsuitable Reasons must contain only short category labels
+separated by semicolons. Do not write explanatory sentences, job-category
+detections, confidence scores, or detailed evidence in Unsuitable Reasons.
+Allowed labels include: Language proficiency mismatch; Degree mismatch;
+Seniority mismatch; Missing mandatory certification/license; Missing required
+professional experience; Missing required tool/software experience; Missing
+required domain/industry experience; Must-have skill mismatch;
+Leadership/management mismatch; Role type mismatch; Location/relocation
+mismatch; Work authorization/clearance mismatch; Physical/medical/safety
+requirement mismatch; Other mandatory requirement mismatch. After those three
+lines, include any additional reason text and, if required by the MASTER PROMPT,
+the tailored LaTeX CV.
 """.strip()
 
 
