@@ -5,37 +5,29 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from jobfinder.spreadsheet.schema import (
+    AI_OUTPUT_COLUMNS,
+    DETAIL_COLUMNS,
+    OUTPUT_COLUMNS,
+    REMOVED_AI_OUTPUT_COLUMNS,
+)
+
+__all__ = [
+    "AI_OUTPUT_COLUMNS",
+    "DEFAULT_MODEL",
+    "DETAIL_COLUMNS",
+    "EvaluationError",
+    "GoogleSheetsError",
+    "JobEvaluation",
+    "JobRecord",
+    "OpenAIQuotaError",
+    "OUTPUT_COLUMNS",
+    "REMOVED_AI_OUTPUT_COLUMNS",
+    "UNHELPFUL_COLUMNS",
+]
+
 DEFAULT_MODEL = "gpt-5-mini"
 MAX_CELL_CHARS = 49_000
-
-OUTPUT_COLUMNS = [
-    "AI Verdict",
-    "AI Fit Score",
-    "AI Unsuitable Reasons",
-    "AI Tailored CV",
-]
-"""AI columns kept in the final spreadsheet."""
-
-REMOVED_AI_OUTPUT_COLUMNS = [
-    "AI Category",
-    "AI Reason",
-    "AI Raw Verdict",
-    "AI Evaluated At",
-    "AI Model",
-    "AI Error",
-]
-"""Legacy AI columns removed from the final spreadsheet after evaluation."""
-
-AI_OUTPUT_COLUMNS = OUTPUT_COLUMNS + REMOVED_AI_OUTPUT_COLUMNS
-"""All AI output columns, including legacy columns, for prompt filtering."""
-
-DETAIL_COLUMNS = [
-    "Job Description",
-    "Description",
-    "Details",
-    "Job Details",
-]
-"""Job detail/description columns removed from the spreadsheet after evaluation."""
 
 UNHELPFUL_COLUMNS = {
     "application status",

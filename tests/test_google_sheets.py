@@ -101,9 +101,7 @@ def install_fake_google_modules(
         monkeypatch.setitem(sys.modules, name, module)
 
 
-def test_build_google_sheets_service_prefers_service_account(
-    tmp_path, monkeypatch
-):
+def test_build_google_sheets_service_prefers_service_account(tmp_path, monkeypatch):
     """A service-account key should bypass the old OAuth token path."""
     service_account_file = tmp_path / "google_service_account.json"
     token_file = tmp_path / "google_token.json"
@@ -159,3 +157,43 @@ def test_build_google_sheets_service_missing_credentials_message(tmp_path, monke
             token_file=tmp_path / "google_token.json",
             client_secret_file=tmp_path / "google_client_secret.json",
         )
+
+
+def test_build_google_sheets_service_rewrites_oauth_token_privately(
+    tmp_path, monkeypatch
+):
+    """Refreshed OAuth tokens should be saved with restrictive permissions."""
+    token_file = tmp_path / "google_token.json"
+    token_file.write_text("old oauth token", encoding="utf-8")
+
+    class RefreshableCredentials:
+        valid = False
+        expired = True
+        refresh_token = "refresh-token"
+
+        def has_scopes(self, scopes):
+            return True
+
+        def refresh(self, request):
+            self.valid = True
+
+        def to_json(self):
+            return '{"token": "new"}'
+
+    def fake_from_authorized_user_file(filename, scopes):
+        return RefreshableCredentials()
+
+    install_fake_google_modules(
+        monkeypatch,
+        user_credentials_loader=fake_from_authorized_user_file,
+    )
+
+    build_google_sheets_service(
+        error_cls=RuntimeError,
+        service_account_file=tmp_path / "google_service_account.json",
+        token_file=token_file,
+        client_secret_file=tmp_path / "google_client_secret.json",
+    )
+
+    assert token_file.read_text(encoding="utf-8") == '{"token": "new"}'
+    assert token_file.stat().st_mode & 0o777 == 0o600

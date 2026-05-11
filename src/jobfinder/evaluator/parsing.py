@@ -249,7 +249,7 @@ def remove_tailored_cv(response_text: str) -> str:
 def extract_reason(response_text: str) -> str:
     """Extract the human-readable reason from a model response."""
     evaluation_text = remove_tailored_cv(response_text)
-    lines = []
+    lines: list[str] = []
     for line in evaluation_text.splitlines():
         stripped = line.strip()
         if not stripped:
@@ -276,7 +276,7 @@ def extract_reason(response_text: str) -> str:
 def extract_unsuitable_reasons(response_text: str) -> str:
     """Extract the labeled reasons for rejecting a not-suitable job."""
     evaluation_text = remove_tailored_cv(response_text)
-    lines = []
+    lines: list[str] = []
     collecting = False
 
     for line in evaluation_text.splitlines():

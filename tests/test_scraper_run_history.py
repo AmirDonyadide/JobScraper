@@ -8,10 +8,12 @@ from zoneinfo import ZoneInfo
 
 from jobfinder.env import EnvSettings
 from jobfinder.scraper.run_history import (
+    SEEN_JOBS_SHEET_NAME,
     apply_previous_run_search_window,
     filter_jobs_to_previous_run_window,
     find_previous_run_started_at,
     job_identity_keys_from_values,
+    load_google_spreadsheet_context,
     remove_jobs_seen_in_history,
 )
 from jobfinder.scraper.settings import ScraperSettings
@@ -39,6 +41,8 @@ def make_settings(run_started_at: datetime) -> ScraperSettings:
         max_results_per_search=500,
         indeed_max_results_per_search=500,
         search_concurrency=1,
+        apify_batch_size=1,
+        apify_memory_limit_mb=0,
         apify_run_memory_mb=512,
         apify_run_timeout_seconds=300,
         apify_client_timeout_seconds=360,
@@ -162,3 +166,139 @@ def test_remove_jobs_seen_in_history_matches_previous_hyperlink_formula():
 
     assert [job["jobId"] for job in kept] == ["999999"]
     assert duplicate_count == 1
+
+
+def test_load_google_spreadsheet_context_prefers_seen_jobs_index(monkeypatch):
+    """Maintained seen-jobs indexes avoid repeatedly scanning historical run tabs."""
+    berlin = ZoneInfo("Europe/Berlin")
+    settings = make_settings(datetime(2026, 5, 6, 10, 0, tzinfo=berlin))
+
+    def fake_read_google_spreadsheet_id(settings):
+        return "spreadsheet-id"
+
+    def fake_get_google_spreadsheet(service, spreadsheet_id):
+        return {
+            "spreadsheetUrl": "https://docs.google.com/spreadsheets/d/spreadsheet-id",
+            "sheets": [
+                {"properties": {"title": "2026-05-05 09-00-00"}},
+                {"properties": {"title": SEEN_JOBS_SHEET_NAME}},
+            ],
+        }
+
+    def fake_read_seen_jobs_index(service, spreadsheet_id):
+        return {"profile|linkedin|gis analyst|geoco|berlin"}
+
+    def fail_historical_scan(service, spreadsheet_id, sheet_names):
+        raise AssertionError("historical tab scan should not run when index exists")
+
+    monkeypatch.setattr(
+        "jobfinder.scraper.export_google_sheets.read_google_spreadsheet_id",
+        fake_read_google_spreadsheet_id,
+    )
+    monkeypatch.setattr(
+        "jobfinder.scraper.export_google_sheets.get_google_spreadsheet",
+        fake_get_google_spreadsheet,
+    )
+    monkeypatch.setattr(
+        "jobfinder.scraper.run_history.read_seen_jobs_index",
+        fake_read_seen_jobs_index,
+    )
+    monkeypatch.setattr(
+        "jobfinder.scraper.run_history.read_historical_google_job_keys",
+        fail_historical_scan,
+    )
+
+    context = load_google_spreadsheet_context(settings, service=object())
+
+    assert context.previous_run_started_at == datetime(2026, 5, 5, 9, 0, tzinfo=berlin)
+    assert context.historical_job_keys == {"profile|linkedin|gis analyst|geoco|berlin"}
+
+
+def test_load_google_spreadsheet_context_seeds_seen_jobs_index(monkeypatch):
+    """The first indexed run should preserve keys discovered from old tabs."""
+    berlin = ZoneInfo("Europe/Berlin")
+    settings = make_settings(datetime(2026, 5, 6, 10, 0, tzinfo=berlin))
+    seeded_keys: list[set[str]] = []
+
+    def fake_read_google_spreadsheet_id(settings):
+        return "spreadsheet-id"
+
+    def fake_get_google_spreadsheet(service, spreadsheet_id):
+        return {
+            "spreadsheetUrl": "https://docs.google.com/spreadsheets/d/spreadsheet-id",
+            "sheets": [{"properties": {"title": "2026-05-05 09-00-00"}}],
+        }
+
+    def fake_historical_scan(service, spreadsheet_id, sheet_names):
+        return {"profile|linkedin|gis analyst|geoco|berlin"}
+
+    def fake_append_seen_job_keys(service, spreadsheet_id, sheet_names, job_keys):
+        seeded_keys.append(set(job_keys))
+
+    monkeypatch.setattr(
+        "jobfinder.scraper.export_google_sheets.read_google_spreadsheet_id",
+        fake_read_google_spreadsheet_id,
+    )
+    monkeypatch.setattr(
+        "jobfinder.scraper.export_google_sheets.get_google_spreadsheet",
+        fake_get_google_spreadsheet,
+    )
+    monkeypatch.setattr(
+        "jobfinder.scraper.run_history.read_historical_google_job_keys",
+        fake_historical_scan,
+    )
+    monkeypatch.setattr(
+        "jobfinder.scraper.run_history.append_seen_job_keys",
+        fake_append_seen_job_keys,
+    )
+
+    context = load_google_spreadsheet_context(settings, service=object())
+
+    assert context.historical_job_keys == {"profile|linkedin|gis analyst|geoco|berlin"}
+    assert seeded_keys == [{"profile|linkedin|gis analyst|geoco|berlin"}]
+
+
+def test_load_google_spreadsheet_context_can_skip_seen_jobs_seed(monkeypatch):
+    """Preflight callers should be able to validate access without writes."""
+    berlin = ZoneInfo("Europe/Berlin")
+    settings = make_settings(datetime(2026, 5, 6, 10, 0, tzinfo=berlin))
+
+    def fake_read_google_spreadsheet_id(settings):
+        return "spreadsheet-id"
+
+    def fake_get_google_spreadsheet(service, spreadsheet_id):
+        return {
+            "spreadsheetUrl": "https://docs.google.com/spreadsheets/d/spreadsheet-id",
+            "sheets": [{"properties": {"title": "2026-05-05 09-00-00"}}],
+        }
+
+    def fake_historical_scan(service, spreadsheet_id, sheet_names):
+        return {"profile|linkedin|gis analyst|geoco|berlin"}
+
+    def fail_append_seen_job_keys(service, spreadsheet_id, sheet_names, job_keys):
+        raise AssertionError("preflight should not seed the index")
+
+    monkeypatch.setattr(
+        "jobfinder.scraper.export_google_sheets.read_google_spreadsheet_id",
+        fake_read_google_spreadsheet_id,
+    )
+    monkeypatch.setattr(
+        "jobfinder.scraper.export_google_sheets.get_google_spreadsheet",
+        fake_get_google_spreadsheet,
+    )
+    monkeypatch.setattr(
+        "jobfinder.scraper.run_history.read_historical_google_job_keys",
+        fake_historical_scan,
+    )
+    monkeypatch.setattr(
+        "jobfinder.scraper.run_history.append_seen_job_keys",
+        fail_append_seen_job_keys,
+    )
+
+    context = load_google_spreadsheet_context(
+        settings,
+        service=object(),
+        seed_seen_jobs_index=False,
+    )
+
+    assert context.historical_job_keys == {"profile|linkedin|gis analyst|geoco|berlin"}

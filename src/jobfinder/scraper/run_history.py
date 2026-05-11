@@ -30,6 +30,8 @@ HYPERLINK_RE = re.compile(
     re.IGNORECASE,
 )
 HISTORICAL_IDENTITY_HEADERS = ("App", "Job Title", "Company", "Location", "Job URL")
+SEEN_JOBS_SHEET_NAME = "_jobfinder_seen_jobs"
+SEEN_JOBS_HEADER = ["Job Key"]
 
 
 @dataclass(frozen=True)
@@ -289,6 +291,83 @@ def batch_get_values(
     return value_ranges
 
 
+def seen_jobs_index_exists(sheet_names: list[str]) -> bool:
+    """Return true when the spreadsheet has the maintained seen-jobs index tab."""
+    return SEEN_JOBS_SHEET_NAME in sheet_names
+
+
+def read_seen_jobs_index(service: Any, spreadsheet_id: str) -> set[str]:
+    """Read canonical job keys from the maintained seen-jobs index tab."""
+    response = (
+        service.spreadsheets()
+        .values()
+        .get(
+            spreadsheetId=spreadsheet_id,
+            range=f"{quote_sheet_name(SEEN_JOBS_SHEET_NAME)}!A2:A",
+        )
+        .execute()
+    )
+    values = response.get("values", [])
+    return {str(row[0]).strip() for row in values if row and str(row[0]).strip()}
+
+
+def ensure_seen_jobs_index_sheet(
+    service: Any,
+    spreadsheet_id: str,
+    sheet_names: list[str],
+) -> None:
+    """Create the hidden seen-jobs index tab when it does not exist."""
+    if seen_jobs_index_exists(sheet_names):
+        return
+
+    service.spreadsheets().batchUpdate(
+        spreadsheetId=spreadsheet_id,
+        body={
+            "requests": [
+                {
+                    "addSheet": {
+                        "properties": {
+                            "title": SEEN_JOBS_SHEET_NAME,
+                            "hidden": True,
+                        }
+                    }
+                }
+            ]
+        },
+    ).execute()
+    service.spreadsheets().values().update(
+        spreadsheetId=spreadsheet_id,
+        range=f"{quote_sheet_name(SEEN_JOBS_SHEET_NAME)}!A1",
+        valueInputOption="RAW",
+        body={"values": [SEEN_JOBS_HEADER]},
+    ).execute()
+
+
+def append_seen_job_keys(
+    service: Any,
+    spreadsheet_id: str,
+    sheet_names: list[str],
+    job_keys: set[str],
+) -> None:
+    """Append newly seen canonical job keys to the maintained index tab."""
+    if not job_keys:
+        return
+
+    ensure_seen_jobs_index_sheet(service, spreadsheet_id, sheet_names)
+    existing_keys = read_seen_jobs_index(service, spreadsheet_id)
+    new_keys = sorted(job_keys - existing_keys)
+    if not new_keys:
+        return
+
+    service.spreadsheets().values().append(
+        spreadsheetId=spreadsheet_id,
+        range=f"{quote_sheet_name(SEEN_JOBS_SHEET_NAME)}!A:A",
+        valueInputOption="RAW",
+        insertDataOption="INSERT_ROWS",
+        body={"values": [[key] for key in new_keys]},
+    ).execute()
+
+
 def sheet_header_indexes(headers: list[Any]) -> dict[str, int]:
     """Return duplicate-relevant header indexes for one sheet."""
     normalized_headers = {
@@ -371,6 +450,8 @@ def read_historical_google_job_keys(
 def load_google_spreadsheet_context(
     settings: ScraperSettings,
     service: Any,
+    *,
+    seed_seen_jobs_index: bool = True,
 ) -> GoogleSpreadsheetContext:
     """Load existing run metadata and duplicate keys from Google Sheets."""
     from jobfinder.scraper.export_google_sheets import (
@@ -393,11 +474,21 @@ def load_google_spreadsheet_context(
             settings.run_started_at,
             settings.scraper_tz,
         )
-        historical_job_keys = read_historical_google_job_keys(
-            service,
-            spreadsheet_id,
-            sheet_names,
-        )
+        if seen_jobs_index_exists(sheet_names):
+            historical_job_keys = read_seen_jobs_index(service, spreadsheet_id)
+        else:
+            historical_job_keys = read_historical_google_job_keys(
+                service,
+                spreadsheet_id,
+                sheet_names,
+            )
+            if seed_seen_jobs_index:
+                append_seen_job_keys(
+                    service,
+                    spreadsheet_id,
+                    sheet_names,
+                    historical_job_keys,
+                )
     except Exception as exc:
         raise GoogleSheetsExportError(
             f"Could not read run history from Google spreadsheet ID "

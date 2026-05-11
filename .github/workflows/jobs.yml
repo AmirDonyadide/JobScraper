@@ -66,6 +66,9 @@ jobs:
       JOB_EVAL_BATCH_SIZE: "40"
       JOB_EVAL_LARGE_QUEUE_THRESHOLD: "200"
       JOB_EVAL_LARGE_QUEUE_SLEEP_MS: "2000"
+      JOBFINDER_PIPELINE_REPORT_FILE: reports/pipeline_preflight.json
+      JOBFINDER_SCRAPER_REPORT_FILE: reports/scraper.json
+      JOBFINDER_EVALUATOR_REPORT_FILE: reports/evaluator.json
       PYTHONUNBUFFERED: "1"
       TZ: Europe/Berlin
 
@@ -202,10 +205,17 @@ jobs:
             chmod 600 google_spreadsheet_id.txt
           fi
 
+      - name: Preflight provider access
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -u run_job_pipeline.py --mode "${JOBFINDER_PIPELINE_MODE}" --preflight
+
       - name: Run selected JobFinder pipeline
         shell: bash
         run: |
           set -o pipefail
+          mkdir -p reports
 
           echo "Starting JobFinder Pipeline at $(date +'%Y-%m-%dT%H:%M:%S%z') (${TZ})"
           echo "Output mode: ${JOBSCRAPER_OUTPUT_MODE}"
@@ -226,6 +236,16 @@ jobs:
           python -u run_job_pipeline.py --mode "${JOBFINDER_PIPELINE_MODE}" 2>&1 | tee pipeline.log
           status=${PIPESTATUS[0]}
 
+          {
+            echo "# JobFinder Run Summary"
+            echo
+            echo "- Status: $([ "$status" -eq 0 ] && echo succeeded || echo failed)"
+            echo "- Pipeline mode: ${JOBFINDER_PIPELINE_MODE}"
+            echo "- Job sources: ${JOBSCRAPER_SOURCES}"
+            echo "- Started at: $(date +'%Y-%m-%dT%H:%M:%S%z')"
+            echo "- GitHub run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          } > reports/workflow_summary.md
+
           if [ "$status" -ne 0 ]; then
             echo "::error::run_job_pipeline.py failed with exit code ${status}."
             exit "$status"
@@ -233,13 +253,25 @@ jobs:
 
           echo "Pipeline finished successfully."
 
-      - name: Print spreadsheet hint
+      - name: Upload run reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: jobfinder-run-reports
+          path: |
+            reports/*.json
+            reports/*.md
+          if-no-files-found: ignore
+
+      - name: Remove private runtime files
         if: always()
         shell: bash
         run: |
-          if [ -f google_spreadsheet_id.txt ]; then
-            echo "Spreadsheet ID used by this run:"
-            cat google_spreadsheet_id.txt
-          else
-            echo "No google_spreadsheet_id.txt was created."
-          fi
+          rm -f \
+            configs/keywords.txt \
+            prompts/master_prompt.txt \
+            cv/master_cv.tex \
+            google_service_account.json \
+            google_spreadsheet_id.txt \
+            pipeline.log
+          rm -rf reports

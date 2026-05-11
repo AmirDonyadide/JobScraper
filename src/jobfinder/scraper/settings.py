@@ -97,6 +97,8 @@ class ScraperSettings:
     max_results_per_search: int
     indeed_max_results_per_search: int
     search_concurrency: int
+    apify_batch_size: int
+    apify_memory_limit_mb: int
     apify_run_memory_mb: int
     apify_run_timeout_seconds: int
     apify_client_timeout_seconds: int
@@ -152,9 +154,13 @@ def load_scraper_settings(env: EnvSettings | None = None) -> ScraperSettings:
     run_started_at_utc = datetime.now(UTC)
     run_started_at = run_started_at_utc.astimezone(scraper_tz)
 
-    max_results_per_search = env.get_int("JOBSCRAPER_MAX_RESULTS_PER_SEARCH", 500)
-    indeed_max_results = env.get_int(
-        "INDEED_MAX_RESULTS_PER_SEARCH", max_results_per_search
+    max_results_per_search = max(
+        1,
+        env.get_int("JOBSCRAPER_MAX_RESULTS_PER_SEARCH", 500),
+    )
+    indeed_max_results = max(
+        1,
+        env.get_int("INDEED_MAX_RESULTS_PER_SEARCH", max_results_per_search),
     )
     apify_run_timeout_seconds = max(
         60,
@@ -171,6 +177,18 @@ def load_scraper_settings(env: EnvSettings | None = None) -> ScraperSettings:
     config_max_applicants = config_int(
         filter_config, "final_filters", "max_applicants", 100
     )
+
+    apify_run_memory_mb = max(128, env.get_int("APIFY_RUN_MEMORY_MB", 512))
+    apify_memory_limit_mb = max(
+        0,
+        env.get_int("JOBSCRAPER_APIFY_MEMORY_LIMIT_MB", 0),
+    )
+    search_concurrency = max(1, env.get_int("JOBSCRAPER_SEARCH_CONCURRENCY", 15))
+    if apify_memory_limit_mb:
+        search_concurrency = min(
+            search_concurrency,
+            max(1, apify_memory_limit_mb // apify_run_memory_mb),
+        )
 
     return ScraperSettings(
         env=env,
@@ -190,8 +208,10 @@ def load_scraper_settings(env: EnvSettings | None = None) -> ScraperSettings:
         excel_output_file=DEFAULT_EXCEL_FILE,
         max_results_per_search=max_results_per_search,
         indeed_max_results_per_search=indeed_max_results,
-        search_concurrency=max(1, env.get_int("JOBSCRAPER_SEARCH_CONCURRENCY", 15)),
-        apify_run_memory_mb=max(128, env.get_int("APIFY_RUN_MEMORY_MB", 512)),
+        search_concurrency=search_concurrency,
+        apify_batch_size=max(1, env.get_int("JOBSCRAPER_APIFY_BATCH_SIZE", 1)),
+        apify_memory_limit_mb=apify_memory_limit_mb,
+        apify_run_memory_mb=apify_run_memory_mb,
         apify_run_timeout_seconds=apify_run_timeout_seconds,
         apify_client_timeout_seconds=apify_client_timeout_seconds,
         apify_transient_error_retries=max(
@@ -251,7 +271,7 @@ def load_scraper_settings(env: EnvSettings | None = None) -> ScraperSettings:
         ),
         indeed_country=env.get("INDEED_COUNTRY", "DE").upper(),
         indeed_location=env.get("INDEED_LOCATION", location),
-        indeed_max_concurrency=env.get_int("INDEED_MAX_CONCURRENCY", 5),
+        indeed_max_concurrency=max(1, env.get_int("INDEED_MAX_CONCURRENCY", 5)),
         indeed_save_only_unique_items=env.get_bool(
             "INDEED_SAVE_ONLY_UNIQUE_ITEMS", True
         ),

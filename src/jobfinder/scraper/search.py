@@ -7,10 +7,20 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from typing import Any
-from urllib.parse import urlencode
 
 import requests
 
+from jobfinder.scraper.providers import indeed, linkedin
+from jobfinder.scraper.providers.apify_client import (
+    ApifyConfigurationError,
+    ApifyRunError,
+    ApifyRunTimeoutError,
+    ApifyTransientError,
+    apify_error_message,
+    apify_http_timeout,
+    retry_delay_seconds,
+    run_actor,
+)
 from jobfinder.scraper.settings import (
     SOURCE_ALIASES,
     SOURCE_ORDER,
@@ -19,41 +29,26 @@ from jobfinder.scraper.settings import (
 )
 
 LOGGER = logging.getLogger("jobfinder.scraper")
-APIFY_POLL_INTERVAL_SECONDS = 15
-APIFY_TERMINAL_STATUSES = {"SUCCEEDED", "FAILED", "ABORTED", "TIMED-OUT"}
-RETRYABLE_APIFY_HTTP_STATUS_CODES = {408, 429, 500, 502, 503, 504}
-MAX_APIFY_RETRY_DELAY_SECONDS = 300
 
-INDEED_DOMAIN_BY_COUNTRY = {
-    "us": "www.indeed.com",
-    "gb": "uk.indeed.com",
-    "uk": "uk.indeed.com",
-    "de": "de.indeed.com",
-    "at": "at.indeed.com",
-    "ch": "ch.indeed.com",
-    "fr": "fr.indeed.com",
-    "nl": "nl.indeed.com",
-    "it": "it.indeed.com",
-    "es": "es.indeed.com",
-    "ca": "ca.indeed.com",
-    "au": "au.indeed.com",
-}
-
-
-class ApifyConfigurationError(RuntimeError):
-    """Raised when Apify rejects the token, actor access, or paid actor setup."""
-
-
-class ApifyRunError(RuntimeError):
-    """Raised when an Apify actor run finishes unsuccessfully."""
-
-
-class ApifyRunTimeoutError(ApifyRunError):
-    """Raised when an Apify actor run exceeds the configured timeout."""
-
-
-class ApifyTransientError(RuntimeError):
-    """Raised for temporary Apify API errors that should be retried."""
+__all__ = [
+    "ApifyConfigurationError",
+    "ApifyRunError",
+    "ApifyRunTimeoutError",
+    "ApifyTransientError",
+    "SearchExecutionError",
+    "SearchRequest",
+    "apify_error_message",
+    "apify_http_timeout",
+    "build_indeed_actor_input",
+    "build_linkedin_actor_input",
+    "build_linkedin_search_url",
+    "fetch_jobs_for_search",
+    "get_searches",
+    "indeed_base_url",
+    "parse_job_sources",
+    "run_actor",
+    "run_all_searches",
+]
 
 
 class SearchExecutionError(RuntimeError):
@@ -73,124 +68,55 @@ class SearchRequest:
     max_items: int
 
 
-def apify_headers(settings: ScraperSettings) -> dict[str, str]:
-    """Build authorization headers for Apify API calls."""
-    return {"Authorization": f"Bearer {settings.apify_api_token}"}
+@dataclass(frozen=True)
+class SearchBatch:
+    """One execution unit that may contain several compatible searches."""
 
+    searches: tuple[tuple[int, SearchRequest], ...]
 
-def apify_error_message(response: requests.Response) -> str:
-    """Extract a concise user-facing error message from an Apify response."""
-    try:
-        data = response.json()
-    except ValueError:
-        return response.text.strip()[:500] or response.reason
+    @property
+    def source(self) -> str:
+        """Return the shared source for the batch."""
+        return self.searches[0][1].source
 
-    if isinstance(data, dict):
-        error = data.get("error")
-        if isinstance(error, dict) and error.get("message"):
-            return str(error["message"])
-        if data.get("message"):
-            return str(data["message"])
+    @property
+    def source_label(self) -> str:
+        """Return the shared display source for the batch."""
+        return self.searches[0][1].source_label
 
-    return str(data)[:500]
-
-
-def apify_response_data(response: requests.Response) -> Any:
-    """Return the Apify response payload, unwrapping the common data envelope."""
-    data = response.json()
-    if isinstance(data, dict) and "data" in data:
-        return data["data"]
-    return data
-
-
-def apify_http_timeout(settings: ScraperSettings) -> int:
-    """Return the HTTP timeout for individual Apify API calls."""
-    return max(1, settings.apify_client_timeout_seconds)
-
-
-def is_retryable_payment_error(response: requests.Response) -> bool:
-    """Return true for Apify 402 memory-limit pressure that can clear later."""
-    if response.status_code != 402:
-        return False
-    message = apify_error_message(response).lower()
-    return "memory limit" in message and "currently used" in message
-
-
-def is_retryable_apify_response(response: requests.Response) -> bool:
-    """Return true when an Apify API response is likely temporary."""
-    return (
-        response.status_code in RETRYABLE_APIFY_HTTP_STATUS_CODES
-        or is_retryable_payment_error(response)
-    )
-
-
-def check_apify_response(response: requests.Response, actor_id: str) -> None:
-    """Raise a user-facing exception for Apify auth/access errors."""
-    if response.status_code in (401, 403):
-        message = apify_error_message(response)
-        raise ApifyConfigurationError(
-            "Apify rejected the request. Check that APIFY_API_TOKEN is valid, "
-            f"that your account can run {actor_id}, and that billing/trial "
-            f"access is active. Apify said: {message}"
+    @property
+    def display_label(self) -> str:
+        """Return a concise label for log output."""
+        if len(self.searches) == 1:
+            return self.searches[0][1].display_label
+        first_keyword = self.searches[0][1].keyword
+        last_keyword = self.searches[-1][1].keyword
+        return (
+            f"{self.source_label} batch: {first_keyword} ... {last_keyword} "
+            f"({len(self.searches)} searches)"
         )
-
-    if is_retryable_apify_response(response):
-        message = apify_error_message(response)
-        raise ApifyTransientError(
-            f"Apify returned HTTP {response.status_code} for {actor_id}: {message}"
-        )
-
-    response.raise_for_status()
 
 
 def indeed_base_url(settings: ScraperSettings) -> str:
     """Return the public Indeed base URL for the configured country."""
-    country_key = settings.indeed_country.lower()
-    domain = INDEED_DOMAIN_BY_COUNTRY.get(country_key, f"{country_key}.indeed.com")
-    return f"https://{domain}"
+    return indeed.base_url(settings)
 
 
 def build_linkedin_search_url(settings: ScraperSettings, keyword: str) -> str:
     """Build a LinkedIn job-search URL for one keyword."""
-    params = {
-        "keywords": keyword,
-        "location": settings.location,
-        "geoId": settings.geo_id,
-        "f_TPR": settings.published_at,
-        "f_E": ",".join(settings.experience_levels),
-        "f_JT": ",".join(settings.contract_types),
-        "position": "1",
-        "pageNum": "0",
-    }
-    return f"https://www.linkedin.com/jobs/search/?{urlencode(params)}"
+    return linkedin.build_search_url(settings, keyword)
 
 
 def build_linkedin_actor_input(
     settings: ScraperSettings, search_url: str
 ) -> dict[str, Any]:
     """Build the Apify actor payload for LinkedIn searches."""
-    payload = {
-        "urls": [search_url],
-        "count": settings.max_results_per_search,
-        "scrapeCompany": settings.scrape_company_details,
-        "useIncognitoMode": settings.use_incognito_mode,
-        "splitByLocation": settings.split_by_location,
-    }
-    if settings.split_by_location:
-        payload["splitCountry"] = settings.split_country
-    return payload
+    return linkedin.build_actor_input(settings, search_url)
 
 
 def build_indeed_actor_input(settings: ScraperSettings, keyword: str) -> dict[str, Any]:
     """Build the Apify actor payload for Indeed searches."""
-    return {
-        "country": settings.indeed_country,
-        "location": settings.indeed_location,
-        "maxConcurrency": settings.indeed_max_concurrency,
-        "maxItems": settings.indeed_max_results_per_search,
-        "position": keyword,
-        "saveOnlyUniqueItems": settings.indeed_save_only_unique_items,
-    }
+    return indeed.build_actor_input(settings, keyword)
 
 
 def build_actor_input(
@@ -254,125 +180,132 @@ def annotate_jobs(
     return [dict(job, _source=source, _source_label=label) for job in jobs]
 
 
-def start_actor_run(
-    settings: ScraperSettings, actor_id: str, payload: dict[str, Any], max_items: int
-) -> dict[str, Any]:
-    """Start a configured Apify actor and return its run metadata."""
-    url = f"https://api.apify.com/v2/acts/{actor_id}/runs"
-    params = {
-        "timeout": settings.apify_run_timeout_seconds,
-        "memory": settings.apify_run_memory_mb,
-        "maxItems": max_items,
+def search_url(search: SearchRequest) -> str:
+    """Return the single search URL from a LinkedIn search request."""
+    urls = search.payload.get("urls")
+    if isinstance(urls, list) and urls:
+        return str(urls[0])
+    return ""
+
+
+def candidate_source_urls(job: dict[str, Any]) -> set[str]:
+    """Return possible actor input/search URL fields from one raw job."""
+    candidates: set[str] = set()
+    for key in (
+        "inputUrl",
+        "input_url",
+        "searchUrl",
+        "search_url",
+        "startUrl",
+        "start_url",
+        "requestUrl",
+        "request_url",
+    ):
+        value = job.get(key)
+        if value and str(value).startswith("http"):
+            candidates.add(str(value))
+    return candidates
+
+
+def group_batched_linkedin_jobs(
+    batch: SearchBatch,
+    jobs: list[dict[str, Any]],
+) -> list[tuple[int, str, list[dict[str, Any]]]] | None:
+    """Group batched LinkedIn results by original keyword when attribution is clear."""
+    url_to_search = {
+        search_url(search): (idx, search)
+        for idx, search in batch.searches
+        if search_url(search)
     }
+    grouped: dict[int, list[dict[str, Any]]] = {idx: [] for idx, _ in batch.searches}
 
-    response = requests.post(
-        url,
-        params=params,
-        headers=apify_headers(settings),
-        json=payload,
-        timeout=apify_http_timeout(settings),
+    for job in jobs:
+        matching_urls = candidate_source_urls(job) & url_to_search.keys()
+        if len(matching_urls) != 1:
+            return None
+        idx, search = url_to_search[matching_urls.pop()]
+        grouped[idx].append(
+            dict(job, _source=search.source, _source_label=search.source_label)
+        )
+
+    return [(idx, search.keyword, grouped[idx]) for idx, search in batch.searches]
+
+
+def build_search_batches(
+    settings: ScraperSettings,
+    searches: list[SearchRequest],
+) -> list[SearchBatch]:
+    """Build execution units, batching only sources with safe attribution fallback."""
+    if settings.apify_batch_size <= 1:
+        return [
+            SearchBatch(((idx, search),))
+            for idx, search in enumerate(searches, start=1)
+        ]
+
+    batches: list[SearchBatch] = []
+    pending_linkedin: list[tuple[int, SearchRequest]] = []
+
+    def flush_linkedin() -> None:
+        nonlocal pending_linkedin
+        if pending_linkedin:
+            batches.append(SearchBatch(tuple(pending_linkedin)))
+            pending_linkedin = []
+
+    for idx, search in enumerate(searches, start=1):
+        if search.source == "linkedin":
+            pending_linkedin.append((idx, search))
+            if len(pending_linkedin) >= settings.apify_batch_size:
+                flush_linkedin()
+            continue
+
+        flush_linkedin()
+        batches.append(SearchBatch(((idx, search),)))
+
+    flush_linkedin()
+    return batches
+
+
+def fetch_jobs_for_batch(
+    settings: ScraperSettings,
+    batch: SearchBatch,
+) -> list[tuple[int, str, list[dict[str, Any]]]]:
+    """Fetch one execution batch, falling back when attribution is not safe."""
+    if len(batch.searches) == 1:
+        idx, search = batch.searches[0]
+        return [(idx, search.keyword, fetch_jobs_for_search(settings, search))]
+
+    first_search = batch.searches[0][1]
+    search_urls = [search_url(search) for _, search in batch.searches]
+    if first_search.source != "linkedin" or not all(search_urls):
+        return [
+            (idx, search.keyword, fetch_jobs_for_search(settings, search))
+            for idx, search in batch.searches
+        ]
+
+    payload = linkedin.build_batch_actor_input(settings, search_urls)
+    batch_search = SearchRequest(
+        source=first_search.source,
+        source_label=first_search.source_label,
+        keyword=", ".join(search.keyword for _, search in batch.searches),
+        display_label=batch.display_label,
+        actor_id=first_search.actor_id,
+        payload=payload,
+        max_items=sum(search.max_items for _, search in batch.searches),
     )
-    check_apify_response(response, actor_id)
+    jobs = fetch_jobs_for_search(settings, batch_search)
+    grouped = group_batched_linkedin_jobs(batch, jobs)
+    if grouped is not None:
+        return grouped
 
-    data = apify_response_data(response)
-    if not isinstance(data, dict) or not data.get("id"):
-        raise ApifyRunError(f"Apify did not return a run id for actor {actor_id}.")
-    return data
-
-
-def get_actor_run(
-    settings: ScraperSettings, actor_id: str, run_id: str
-) -> dict[str, Any]:
-    """Fetch the latest metadata for an Apify actor run."""
-    url = f"https://api.apify.com/v2/actor-runs/{run_id}"
-    response = requests.get(
-        url,
-        headers=apify_headers(settings),
-        timeout=apify_http_timeout(settings),
+    LOGGER.warning(
+        "LinkedIn batch result attribution was not available for %s. "
+        "Re-running those searches individually to preserve keyword matching.",
+        batch.display_label,
     )
-    check_apify_response(response, actor_id)
-
-    data = apify_response_data(response)
-    if not isinstance(data, dict):
-        raise ApifyRunError(f"Apify returned invalid run data for run {run_id}.")
-    return data
-
-
-def wait_for_actor_run(
-    settings: ScraperSettings, actor_id: str, run_id: str
-) -> dict[str, Any]:
-    """Poll an Apify actor run until it reaches a terminal status."""
-    deadline = (
-        time.monotonic()
-        + settings.apify_run_timeout_seconds
-        + APIFY_POLL_INTERVAL_SECONDS
-    )
-
-    while True:
-        run = get_actor_run(settings, actor_id, run_id)
-        status = str(run.get("status") or "").upper()
-        if status in APIFY_TERMINAL_STATUSES:
-            if status == "SUCCEEDED":
-                return run
-            if status == "TIMED-OUT":
-                raise ApifyRunTimeoutError(
-                    f"Apify run {run_id} timed out after "
-                    f"{settings.apify_run_timeout_seconds}s."
-                )
-            raise ApifyRunError(f"Apify run {run_id} finished with status {status}.")
-
-        remaining = deadline - time.monotonic()
-        if remaining <= 0:
-            raise ApifyRunTimeoutError(
-                f"Apify run {run_id} did not finish within "
-                f"{settings.apify_run_timeout_seconds}s."
-            )
-
-        time.sleep(min(APIFY_POLL_INTERVAL_SECONDS, remaining))
-
-
-def fetch_dataset_items(
-    settings: ScraperSettings, actor_id: str, dataset_id: str, max_items: int
-) -> list[dict[str, Any]]:
-    """Fetch JSON items from an Apify dataset."""
-    url = f"https://api.apify.com/v2/datasets/{dataset_id}/items"
-    params = {"format": "json", "limit": max_items}
-    response = requests.get(
-        url,
-        params=params,
-        headers=apify_headers(settings),
-        timeout=apify_http_timeout(settings),
-    )
-    check_apify_response(response, actor_id)
-
-    data = response.json()
-    if isinstance(data, list):
-        return data
-    if isinstance(data, dict) and "items" in data:
-        items = data["items"]
-        return items if isinstance(items, list) else []
-    return []
-
-
-def run_actor(
-    settings: ScraperSettings, actor_id: str, payload: dict[str, Any], max_items: int
-) -> list[dict[str, Any]]:
-    """Run a configured Apify actor and return its dataset items."""
-    run = start_actor_run(settings, actor_id, payload, max_items)
-    run_id = str(run["id"])
-    completed_run = wait_for_actor_run(settings, actor_id, run_id)
-    dataset_id = completed_run.get("defaultDatasetId") or run.get("defaultDatasetId")
-    if not dataset_id:
-        raise ApifyRunError(f"Apify run {run_id} did not include a default dataset id.")
-    return fetch_dataset_items(settings, actor_id, str(dataset_id), max_items)
-
-
-def retry_delay_seconds(settings: ScraperSettings, attempt: int) -> int:
-    """Return the backoff delay before retrying a transient Apify issue."""
-    return min(
-        settings.apify_retry_delay_seconds * attempt,
-        MAX_APIFY_RETRY_DELAY_SECONDS,
-    )
+    return [
+        (idx, search.keyword, fetch_jobs_for_search(settings, search))
+        for idx, search in batch.searches
+    ]
 
 
 def search_failure_message(label: str, exc: Exception) -> str:
@@ -445,34 +378,39 @@ def run_all_searches(
     zero_searches: list[str] = []
     failed_sources: dict[str, str] = {}
     skipped_searches: list[str] = []
-    max_workers = min(settings.search_concurrency, len(searches))
+    search_batches = build_search_batches(settings, searches)
+    max_workers = min(settings.search_concurrency, len(search_batches))
     submitted_count = 0
 
-    LOGGER.info("Running up to %s search(es) in parallel.", max_workers)
+    LOGGER.info(
+        "Running up to %s search execution unit(s) in parallel.",
+        max_workers,
+    )
 
     def submit_next(
         executor: ThreadPoolExecutor,
         search_iter: Any,
-        in_flight: dict[Any, tuple[int, SearchRequest]],
+        in_flight: dict[Any, SearchBatch],
     ) -> None:
         """Submit searches until the concurrency window is full."""
         nonlocal submitted_count
         while len(in_flight) < max_workers:
             try:
-                idx, search = next(search_iter)
+                batch = next(search_iter)
             except StopIteration:
                 return
 
-            label = search.display_label
-            if search.source in failed_sources:
-                LOGGER.info(
-                    "[%02d/%s] Skipping %s because %s failed earlier in this run.",
-                    idx,
-                    len(searches),
-                    label,
-                    search.source_label,
-                )
-                skipped_searches.append(label)
+            label = batch.display_label
+            if batch.source in failed_sources:
+                for idx, search in batch.searches:
+                    LOGGER.info(
+                        "[%02d/%s] Skipping %s because %s failed earlier in this run.",
+                        idx,
+                        len(searches),
+                        search.display_label,
+                        search.source_label,
+                    )
+                    skipped_searches.append(search.display_label)
                 continue
 
             if settings.delay_between_requests and submitted_count:
@@ -480,48 +418,61 @@ def run_all_searches(
 
             LOGGER.info(
                 "[%02d/%s] Searching %s with Apify actor %s.",
-                idx,
+                batch.searches[0][0],
                 len(searches),
                 label,
-                search.actor_id,
+                batch.searches[0][1].actor_id,
             )
-            future = executor.submit(fetch_jobs_for_search, settings, search)
-            in_flight[future] = (idx, search)
+            future = executor.submit(fetch_jobs_for_batch, settings, batch)
+            in_flight[future] = batch
             submitted_count += 1
 
-    search_iter = iter(enumerate(searches, start=1))
+    search_iter = iter(search_batches)
 
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        in_flight: dict[Any, tuple[int, SearchRequest]] = {}
+        in_flight: dict[Any, SearchBatch] = {}
         submit_next(executor, search_iter, in_flight)
 
         while in_flight:
             for future in as_completed(tuple(in_flight)):
-                idx, search = in_flight.pop(future)
-                label = search.display_label
+                batch = in_flight.pop(future)
 
                 try:
-                    jobs = future.result()
+                    batch_results = future.result()
                 except ApifyConfigurationError as exc:
-                    if search.source not in failed_sources:
+                    if batch.source not in failed_sources:
                         LOGGER.error("%s", exc)
                         LOGGER.warning(
                             "Continuing with other sources. Remaining %s searches "
                             "will be skipped.",
-                            search.source_label,
+                            batch.source_label,
                         )
-                        failed_sources[search.source] = str(exc)
-                    skipped_searches.append(label)
+                        failed_sources[batch.source] = str(exc)
+                    skipped_searches.extend(
+                        search.display_label for _, search in batch.searches
+                    )
                 except SearchExecutionError as exc:
                     LOGGER.error("%s", exc)
                     raise
                 else:
-                    all_results.append((idx, search.keyword, jobs))
-                    if jobs:
-                        LOGGER.info("Completed %s: %s job(s) found.", label, len(jobs))
-                    else:
-                        LOGGER.info("Completed %s: 0 results.", label)
-                        zero_searches.append(label)
+                    for idx, keyword, jobs in batch_results:
+                        search = next(
+                            search
+                            for search_idx, search in batch.searches
+                            if search_idx == idx
+                        )
+                        all_results.append((idx, keyword, jobs))
+                        if jobs:
+                            LOGGER.info(
+                                "Completed %s: %s job(s) found.",
+                                search.display_label,
+                                len(jobs),
+                            )
+                        else:
+                            LOGGER.info(
+                                "Completed %s: 0 results.", search.display_label
+                            )
+                            zero_searches.append(search.display_label)
 
                 submit_next(executor, search_iter, in_flight)
                 break

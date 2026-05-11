@@ -123,6 +123,8 @@ Common settings:
 | `JOBSCRAPER_OUTPUT_MODE` | `excel` | Use `excel`, `google_sheets`, or `both`. The full pipeline forces Google Sheets. |
 | `JOBFINDER_PIPELINE_MODE` | `scrape_and_evaluate` | For `run_job_pipeline.py`, use `scrape_only` or `scrape_and_evaluate`. |
 | `JOBSCRAPER_SEARCH_CONCURRENCY` | `15` | Number of Apify searches run at the same time. |
+| `JOBSCRAPER_APIFY_MEMORY_LIMIT_MB` | `0` | Optional total Apify memory cap used to reduce search concurrency; `0` disables the cap. |
+| `JOBSCRAPER_APIFY_BATCH_SIZE` | `1` | Optional LinkedIn search batch size. Keep `1` unless actor results expose source search URLs for attribution. |
 | `JOBSCRAPER_MAX_RESULTS_PER_SEARCH` | `500` | Maximum LinkedIn results per keyword. |
 | `JOBSCRAPER_SEARCH_WINDOW_BUFFER_SECONDS` | `3600` | Extra search-window padding before exact posted-time filtering, to avoid missing jobs while the run is starting. |
 | `APIFY_RUN_TIMEOUT_SECONDS` | `3600` | Maximum Apify actor runtime per keyword search. |
@@ -136,6 +138,7 @@ Common settings:
 | `JOB_EVAL_BATCH_SIZE` | `40` | Number of jobs processed per evaluator batch. |
 | `JOB_EVAL_LARGE_QUEUE_THRESHOLD` | `200` | Enable request pacing when more than this many rows are queued for OpenAI. |
 | `JOB_EVAL_LARGE_QUEUE_SLEEP_MS` | `2000` | Milliseconds to wait between OpenAI request starts for large queues. |
+| `JOB_EVAL_SAVE_BATCH_SIZE` | `1` | Number of completed evaluations to save per write. `1` preserves row-by-row crash recovery. |
 
 ## Google Sheets Setup
 
@@ -354,6 +357,13 @@ Full Google Sheets pipeline:
 python run_job_pipeline.py
 ```
 
+If you install the package locally with `python -m pip install -e .`, the
+packaged console-script equivalent is:
+
+```bash
+jobfinder-pipeline
+```
+
 Scrape to Google Sheets without evaluation:
 
 ```bash
@@ -376,6 +386,19 @@ Evaluate the latest local Excel worksheet:
 
 ```bash
 python job_fit_evaluator.py --source excel --sheet latest
+```
+
+## Development Checks
+
+Before changing behavior, run the same checks used by CI:
+
+```bash
+python -m ruff check .
+python -m ruff format --check .
+python -m mypy src
+python -m compileall src tests scripts run_job_pipeline.py linkedin_job_scraper.py job_fit_evaluator.py job_scraper_config.py
+python -m json.tool configs/filters.json
+python -m pytest
 ```
 
 ## Output Columns

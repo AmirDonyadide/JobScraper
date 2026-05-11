@@ -15,6 +15,7 @@ from jobfinder.scraper.search import (
     apify_http_timeout,
     fetch_jobs_for_search,
     run_actor,
+    run_all_searches,
 )
 
 
@@ -46,6 +47,14 @@ def make_settings() -> SimpleNamespace:
         apify_client_timeout_seconds=120,
         apify_transient_error_retries=5,
         apify_retry_delay_seconds=0,
+        apify_batch_size=1,
+        search_concurrency=2,
+        delay_between_requests=0,
+        max_results_per_search=500,
+        scrape_company_details=False,
+        use_incognito_mode=True,
+        split_by_location=False,
+        split_country="DE",
     )
 
 
@@ -72,8 +81,12 @@ def test_run_actor_uses_async_api_and_fetches_dataset(monkeypatch):
             )
         return FakeResponse([{"title": "GIS Analyst"}])
 
-    monkeypatch.setattr("jobfinder.scraper.search.requests.post", fake_post)
-    monkeypatch.setattr("jobfinder.scraper.search.requests.get", fake_get)
+    monkeypatch.setattr(
+        "jobfinder.scraper.providers.apify_client.requests.post", fake_post
+    )
+    monkeypatch.setattr(
+        "jobfinder.scraper.providers.apify_client.requests.get", fake_get
+    )
 
     jobs = run_actor(settings, "owner~actor", {"input": True}, 500)
 
@@ -101,8 +114,12 @@ def test_run_actor_reports_apify_timed_out_status(monkeypatch):
     def fake_get(url: str, **kwargs: Any) -> FakeResponse:
         return FakeResponse({"data": {"id": "run-1", "status": "TIMED-OUT"}})
 
-    monkeypatch.setattr("jobfinder.scraper.search.requests.post", fake_post)
-    monkeypatch.setattr("jobfinder.scraper.search.requests.get", fake_get)
+    monkeypatch.setattr(
+        "jobfinder.scraper.providers.apify_client.requests.post", fake_post
+    )
+    monkeypatch.setattr(
+        "jobfinder.scraper.providers.apify_client.requests.get", fake_get
+    )
 
     with pytest.raises(ApifyRunTimeoutError):
         run_actor(settings, "owner~actor", {"input": True}, 500)
@@ -135,8 +152,12 @@ def test_fetch_jobs_for_search_retries_temporary_apify_http_errors(monkeypatch):
             )
         return FakeResponse([{"title": "GIS Analyst"}])
 
-    monkeypatch.setattr("jobfinder.scraper.search.requests.post", fake_post)
-    monkeypatch.setattr("jobfinder.scraper.search.requests.get", fake_get)
+    monkeypatch.setattr(
+        "jobfinder.scraper.providers.apify_client.requests.post", fake_post
+    )
+    monkeypatch.setattr(
+        "jobfinder.scraper.providers.apify_client.requests.get", fake_get
+    )
 
     jobs = fetch_jobs_for_search(
         settings,
@@ -165,7 +186,9 @@ def test_fetch_jobs_for_search_fails_after_retry_budget(monkeypatch):
     def fake_post(url: str, **kwargs: Any) -> FakeResponse:
         return FakeResponse("<h1>Bad Gateway</h1>", status_code=502)
 
-    monkeypatch.setattr("jobfinder.scraper.search.requests.post", fake_post)
+    monkeypatch.setattr(
+        "jobfinder.scraper.providers.apify_client.requests.post", fake_post
+    )
 
     with pytest.raises(SearchExecutionError):
         fetch_jobs_for_search(
@@ -180,3 +203,58 @@ def test_fetch_jobs_for_search_fails_after_retry_budget(monkeypatch):
                 max_items=500,
             ),
         )
+
+
+def test_run_all_searches_batches_linkedin_when_results_are_attributable(monkeypatch):
+    """Opt-in LinkedIn batching should preserve keyword attribution when possible."""
+    settings = make_settings()
+    settings.apify_batch_size = 2
+    payloads: list[dict[str, Any]] = []
+
+    def fake_run_actor(settings, actor_id, payload, max_items):
+        payloads.append(payload)
+        first_url, second_url = payload["urls"]
+        return [
+            {"title": "GIS Analyst", "inputUrl": first_url},
+            {"title": "Python Analyst", "inputUrl": second_url},
+        ]
+
+    monkeypatch.setattr("jobfinder.scraper.search.run_actor", fake_run_actor)
+
+    results, zero_searches, failed_sources, skipped_searches = run_all_searches(
+        settings,
+        [
+            SearchRequest(
+                source="linkedin",
+                source_label="LinkedIn",
+                keyword="GIS",
+                display_label="LinkedIn / GIS",
+                actor_id="owner~actor",
+                payload={
+                    "urls": ["https://www.linkedin.com/jobs/search/?keywords=GIS"]
+                },
+                max_items=500,
+            ),
+            SearchRequest(
+                source="linkedin",
+                source_label="LinkedIn",
+                keyword="Python",
+                display_label="LinkedIn / Python",
+                actor_id="owner~actor",
+                payload={
+                    "urls": ["https://www.linkedin.com/jobs/search/?keywords=Python"]
+                },
+                max_items=500,
+            ),
+        ],
+    )
+
+    assert len(payloads) == 1
+    assert [keyword for keyword, _ in results] == ["GIS", "Python"]
+    assert [jobs[0]["title"] for _, jobs in results] == [
+        "GIS Analyst",
+        "Python Analyst",
+    ]
+    assert zero_searches == []
+    assert failed_sources == {}
+    assert skipped_searches == []

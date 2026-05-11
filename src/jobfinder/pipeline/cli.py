@@ -8,8 +8,10 @@ import os
 import subprocess
 import sys
 
-from jobfinder.env import load_local_env
+from jobfinder.env import EnvSettings, load_local_env
+from jobfinder.operations.reports import write_report_from_env
 from jobfinder.paths import ENV_FILE, PROJECT_ROOT
+from jobfinder.pipeline.preflight import run_preflight
 from jobfinder.scraper.settings import TOKEN_PLACEHOLDER
 
 LOGGER = logging.getLogger("jobfinder.pipeline")
@@ -118,6 +120,11 @@ def build_arg_parser() -> argparse.ArgumentParser:
             "JOBFINDER_PIPELINE_MODE or scrape_and_evaluate."
         ),
     )
+    parser.add_argument(
+        "--preflight",
+        action="store_true",
+        help="Validate configuration and provider access without running the pipeline.",
+    )
     return parser
 
 
@@ -142,6 +149,36 @@ def main() -> int:
     pipeline_mode = resolve_pipeline_mode(args, local_env)
     validate_required_settings(local_env, pipeline_mode)
     validate_python_dependencies(pipeline_mode)
+
+    if args.preflight:
+        try:
+            result = run_preflight(
+                env=EnvSettings(local_env),
+                should_evaluate=pipeline_mode == PIPELINE_MODE_SCRAPE_AND_EVALUATE,
+            )
+        except Exception as exc:
+            LOGGER.error("Preflight failed: %s", exc)
+            write_report_from_env(
+                "JOBFINDER_PIPELINE_REPORT_FILE",
+                "failed",
+                "preflight",
+                {"error": str(exc)},
+            )
+            return 1
+        else:
+            write_report_from_env(
+                "JOBFINDER_PIPELINE_REPORT_FILE",
+                "succeeded",
+                "preflight",
+                result,
+            )
+            LOGGER.info(
+                "Preflight complete. sources=%s, output=%s, keywords=%s",
+                result.source_mode,
+                result.output_mode,
+                result.keyword_count,
+            )
+            return 0
 
     env = os.environ.copy()
     for key, value in local_env.items():

@@ -6,6 +6,7 @@ from typing import Any
 
 from jobfinder.google_sheets import build_google_sheets_service, quote_sheet_name
 from jobfinder.scraper.export_rows import HEADER, make_job_rows, unique_name
+from jobfinder.scraper.run_history import append_seen_job_keys, job_identity_keys
 from jobfinder.scraper.settings import SPREADSHEET_TITLE, ScraperSettings
 
 
@@ -127,8 +128,7 @@ def format_spreadsheet(
                     }
                 },
                 "fields": (
-                    "userEnteredFormat"
-                    "(backgroundColor,horizontalAlignment,textFormat)"
+                    "userEnteredFormat(backgroundColor,horizontalAlignment,textFormat)"
                 ),
             }
         },
@@ -235,7 +235,7 @@ def add_google_run_sheet(
 
 def get_or_create_google_run_sheet(
     settings: ScraperSettings, service: Any
-) -> tuple[str, str, str, int]:
+) -> tuple[str, str, str, int, list[str]]:
     """Return spreadsheet and sheet metadata for the current scraper run."""
     spreadsheet_id = read_google_spreadsheet_id(settings)
     if not spreadsheet_id:
@@ -245,6 +245,7 @@ def get_or_create_google_run_sheet(
             spreadsheet["spreadsheetUrl"],
             sheet_name,
             sheet_id,
+            [sheet_name],
         )
 
     try:
@@ -262,19 +263,29 @@ def get_or_create_google_run_sheet(
     sheet_name, sheet_id = add_google_run_sheet(
         settings, service, spreadsheet_id, existing_names
     )
-    return spreadsheet_id, spreadsheet["spreadsheetUrl"], sheet_name, sheet_id
+    return (
+        spreadsheet_id,
+        spreadsheet["spreadsheetUrl"],
+        sheet_name,
+        sheet_id,
+        list(existing_names),
+    )
 
 
 def export_to_google_sheets(
     settings: ScraperSettings, service: Any, jobs: list[dict[str, Any]]
 ) -> str:
     """Write jobs to a new timestamped tab in Google Sheets."""
-    spreadsheet_id, spreadsheet_url, sheet_name, sheet_id = (
+    spreadsheet_id, spreadsheet_url, sheet_name, sheet_id, existing_sheet_names = (
         get_or_create_google_run_sheet(settings, service)
     )
     job_rows = make_job_rows(settings, jobs)
 
     update_values(service, spreadsheet_id, sheet_name, job_rows)
     format_spreadsheet(settings, service, spreadsheet_id, sheet_id, len(job_rows))
+    seen_keys: set[str] = set()
+    for job in jobs:
+        seen_keys.update(job_identity_keys(settings, job))
+    append_seen_job_keys(service, spreadsheet_id, existing_sheet_names, seen_keys)
 
     return f"{spreadsheet_url} (sheet: {sheet_name})"

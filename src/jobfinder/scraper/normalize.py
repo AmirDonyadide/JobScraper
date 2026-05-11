@@ -332,23 +332,27 @@ def parse_applicant_count_value(value: Any) -> int | None:
     if isinstance(value, int | float):
         return int(value) if value >= 0 else None
     if isinstance(value, dict):
-        parsed_counts = [
-            parse_applicant_count_value(value[key])
-            for key in (*APPLICANT_COUNT_KEYS, "count", "value", "text", "label")
-            if key in value
-        ]
-        parsed_counts = [count for count in parsed_counts if count is not None]
-        return max(parsed_counts) if parsed_counts else None
+        dict_counts: list[int] = []
+        for key in (*APPLICANT_COUNT_KEYS, "count", "value", "text", "label"):
+            if key not in value:
+                continue
+            count = parse_applicant_count_value(value[key])
+            if count is not None:
+                dict_counts.append(count)
+        return max(dict_counts) if dict_counts else None
     if isinstance(value, list):
-        parsed_counts = [parse_applicant_count_value(item) for item in value]
-        parsed_counts = [count for count in parsed_counts if count is not None]
-        return max(parsed_counts) if parsed_counts else None
+        list_counts: list[int] = []
+        for item in value:
+            count = parse_applicant_count_value(item)
+            if count is not None:
+                list_counts.append(count)
+        return max(list_counts) if list_counts else None
 
     text = str(value).strip()
     if not text or text == "N/A":
         return None
 
-    parsed_counts = []
+    text_counts: list[int] = []
     for match in APPLICANT_NUMBER_RE.finditer(text):
         count = parse_applicant_number(match.group("number"), match.group("unit"))
         if count is None:
@@ -363,9 +367,9 @@ def parse_applicant_count_value(value: Any) -> int | None:
         ):
             count += 1
 
-        parsed_counts.append(count)
+        text_counts.append(count)
 
-    return max(parsed_counts) if parsed_counts else None
+    return max(text_counts) if text_counts else None
 
 
 def get_applicant_count(job: dict[str, Any]) -> int | None:

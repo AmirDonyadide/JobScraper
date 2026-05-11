@@ -19,10 +19,12 @@ Add your own `APIFY_API_TOKEN` to `.env` before running the scraper.
 Run these checks:
 
 ```bash
-python -m ruff check linkedin_job_scraper.py job_scraper_config.py
-python -m pyflakes linkedin_job_scraper.py job_scraper_config.py
-python -m compileall linkedin_job_scraper.py job_scraper_config.py
-python -m json.tool filters.json
+python -m ruff check .
+python -m ruff format --check .
+python -m mypy src
+python -m compileall src tests scripts run_job_pipeline.py linkedin_job_scraper.py job_fit_evaluator.py job_scraper_config.py
+python -m json.tool configs/filters.json
+python -m pytest
 ```
 
 For documentation-only changes, read the rendered Markdown and make sure commands and environment variable names match the script.
@@ -31,7 +33,7 @@ For documentation-only changes, read the rendered Markdown and make sure command
 
 - Preserve the existing input and output columns unless the README and downstream users are updated together.
 - Keep `.env.example` in sync with supported environment variables.
-- Prefer `.env` settings for operational tuning, `keywords.txt` for search terms, and `filters.json` for search/filter words.
+- Prefer `.env` settings for operational tuning, `configs/keywords.txt` for search terms, and `configs/filters.json` for search/filter words.
 - Keep generated files and credentials out of Git.
 - Do not print or commit tokens, Google credential files, generated workbooks, or local spreadsheet IDs.
 - If changing deduplication, date parsing, or export formatting, add a small manual smoke test note to the pull request.
@@ -40,11 +42,11 @@ For documentation-only changes, read the rendered Markdown and make sure command
 
 | Change | Where |
 |---|---|
-| Add or remove search terms | `keywords.txt` |
-| Change LinkedIn location | `filters.json` |
-| Change title exclusions | `filters.json` |
-| Change applicant-count limit | `filters.json` |
-| Change spreadsheet status words | `filters.json` |
+| Add or remove search terms | `configs/keywords.txt` |
+| Change LinkedIn location | `configs/filters.json` |
+| Change title exclusions | `configs/filters.json` |
+| Change applicant-count limit | `configs/filters.json` |
+| Change spreadsheet status words | `configs/filters.json` |
 | Tune speed or timeouts | `.env` or GitHub Actions environment variables |
 | Change default local settings | `.env.example` |
 | Explain user-facing behavior | `README.md` |

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+from contextlib import suppress
 from pathlib import Path
 from typing import Any
 
@@ -13,6 +15,13 @@ from jobfinder.paths import (
 
 GOOGLE_SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
 """OAuth scopes required to read and write Google Sheets."""
+
+
+def write_private_text_file(path: Path, text: str) -> None:
+    """Write a local credential-like file with restrictive permissions."""
+    path.write_text(text, encoding="utf-8")
+    with suppress(OSError):
+        os.chmod(path, 0o600)
 
 
 def build_google_sheets_service(
@@ -72,7 +81,7 @@ def build_google_sheets_service(
             )
             creds = flow.run_local_server(port=0)
 
-        token_file.write_text(creds.to_json(), encoding="utf-8")
+        write_private_text_file(token_file, creds.to_json())
 
     return build("sheets", "v4", credentials=creds, cache_discovery=False)
 
