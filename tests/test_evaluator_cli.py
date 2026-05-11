@@ -4,6 +4,11 @@ from __future__ import annotations
 
 from jobfinder.env import EnvSettings
 from jobfinder.evaluator.cli import build_arg_parser, parse_source
+from jobfinder.evaluator.models import EvaluationError
+from jobfinder.evaluator.service import (
+    parse_unsuitable_row_policy,
+    should_remove_rejected_rows,
+)
 
 
 def test_parse_source_accepts_google_aliases():
@@ -32,3 +37,22 @@ def test_arg_parser_accepts_google_sheet_id_option():
 
     assert args.source == "google"
     assert args.google_sheet_id == "spreadsheet-id"
+
+
+def test_parse_unsuitable_row_policy_controls_final_filtering():
+    """The evaluator should support keeping all rows or filtering rejections."""
+    filtered = parse_unsuitable_row_policy("")
+    keep_all = parse_unsuitable_row_policy("keep_all")
+
+    assert should_remove_rejected_rows(filtered) is True
+    assert should_remove_rejected_rows(keep_all) is False
+
+
+def test_parse_unsuitable_row_policy_rejects_unknown_values():
+    """Bad row-policy settings should fail before the evaluator writes output."""
+    try:
+        parse_unsuitable_row_policy("remove_everything")
+    except EvaluationError as exc:
+        assert "JOB_EVAL_UNSUITABLE_ROW_POLICY" in str(exc)
+    else:
+        raise AssertionError("Expected an unsupported unsuitable row policy to fail.")

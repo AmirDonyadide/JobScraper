@@ -144,6 +144,7 @@ Common settings:
 | `JOB_EVAL_LARGE_QUEUE_THRESHOLD` | `200` | Enable request pacing when more than this many rows are queued for OpenAI. |
 | `JOB_EVAL_LARGE_QUEUE_SLEEP_MS` | `2000` | Milliseconds to wait between OpenAI request starts for large queues. |
 | `JOB_EVAL_SAVE_BATCH_SIZE` | `1` | Number of completed evaluations to save per write. `1` preserves row-by-row crash recovery. |
+| `JOB_EVAL_UNSUITABLE_ROW_POLICY` | `single_label_only` | Use `single_label_only` to keep `Not Suitable` rows with exactly one label and remove the rest, or `keep_all` to preserve every evaluated row. |
 
 ## 4. Set Up Google Sheets For The Full Pipeline
 
@@ -256,6 +257,7 @@ python job_fit_evaluator.py --source excel --sheet latest
 - Google Sheets runs create a new dated tab in the configured spreadsheet.
 - `python run_job_pipeline.py` evaluates the latest new Google Sheet tab in place.
 - Completed evaluations are saved as rows finish, so a later failure keeps already completed rows.
+- By default, final cleanup keeps only one-label `Not Suitable` rows. Set `JOB_EVAL_UNSUITABLE_ROW_POLICY=keep_all` to preserve all evaluated rows.
 - After evaluation, the final AI columns are `AI Verdict`, `AI Fit Score`, `AI Unsuitable Reasons`, and `AI Tailored CV`.
 
 ## 8. Troubleshooting Local Runs

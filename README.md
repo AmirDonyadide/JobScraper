@@ -17,7 +17,9 @@ The simplest production workflow is the GitHub Actions workflow. After setup, yo
    - `AI Fit Score`
    - `AI Unsuitable Reasons`
    - `AI Tailored CV`
-8. Removes the long job-description/details column after evaluation.
+8. By default, keeps `Not Suitable` rows only when they have exactly one unsuitable-reason label.
+9. By default, removes the other `Not Suitable` rows from the final output.
+10. Removes the long job-description/details column after evaluation.
 
 ## How To Run
 
@@ -111,6 +113,11 @@ Final AI columns after evaluation:
 - `AI Fit Score`
 - `AI Unsuitable Reasons`
 - `AI Tailored CV`
+
+After evaluation, the default final-output policy keeps `Not Suitable` rows only
+when they have exactly one unsuitable-reason label. Other `Not Suitable` rows are
+removed. Manual GitHub Actions runs can choose `keep_all` to preserve every
+evaluated row.
 
 ## Security Notes
 

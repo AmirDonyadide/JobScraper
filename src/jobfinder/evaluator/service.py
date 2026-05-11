@@ -45,6 +45,24 @@ SOURCE_ALIASES = {
     "drive": "google_sheets",
 }
 
+UNSUITABLE_ROW_POLICY_SINGLE_LABEL_ONLY = "single_label_only"
+UNSUITABLE_ROW_POLICY_KEEP_ALL = "keep_all"
+UNSUITABLE_ROW_POLICY_ALIASES = {
+    "single_label_only": UNSUITABLE_ROW_POLICY_SINGLE_LABEL_ONLY,
+    "single-label-only": UNSUITABLE_ROW_POLICY_SINGLE_LABEL_ONLY,
+    "filter": UNSUITABLE_ROW_POLICY_SINGLE_LABEL_ONLY,
+    "filtered": UNSUITABLE_ROW_POLICY_SINGLE_LABEL_ONLY,
+    "hide_multi_label": UNSUITABLE_ROW_POLICY_SINGLE_LABEL_ONLY,
+    "hide-multi-label": UNSUITABLE_ROW_POLICY_SINGLE_LABEL_ONLY,
+    "remove_multi_label": UNSUITABLE_ROW_POLICY_SINGLE_LABEL_ONLY,
+    "remove-multi-label": UNSUITABLE_ROW_POLICY_SINGLE_LABEL_ONLY,
+    "keep_all": UNSUITABLE_ROW_POLICY_KEEP_ALL,
+    "keep-all": UNSUITABLE_ROW_POLICY_KEEP_ALL,
+    "all": UNSUITABLE_ROW_POLICY_KEEP_ALL,
+    "save_all": UNSUITABLE_ROW_POLICY_KEEP_ALL,
+    "save-all": UNSUITABLE_ROW_POLICY_KEEP_ALL,
+}
+
 
 @dataclass(frozen=True)
 class EvaluationOptions:
@@ -68,6 +86,7 @@ class EvaluationOptions:
     large_queue_threshold: int
     large_queue_sleep_ms: int
     save_batch_size: int
+    unsuitable_row_policy: str
 
 
 @dataclass(frozen=True)
@@ -113,7 +132,30 @@ def options_from_env(
         large_queue_threshold=env.get_int("JOB_EVAL_LARGE_QUEUE_THRESHOLD", 200),
         large_queue_sleep_ms=env.get_int("JOB_EVAL_LARGE_QUEUE_SLEEP_MS", 2000),
         save_batch_size=max(1, env.get_int("JOB_EVAL_SAVE_BATCH_SIZE", 1)),
+        unsuitable_row_policy=parse_unsuitable_row_policy(
+            env.get("JOB_EVAL_UNSUITABLE_ROW_POLICY")
+        ),
     )
+
+
+def parse_unsuitable_row_policy(value: str | None) -> str:
+    """Resolve how final output should handle not-suitable rows."""
+    normalized = (value or UNSUITABLE_ROW_POLICY_SINGLE_LABEL_ONLY).strip().casefold()
+    policy = UNSUITABLE_ROW_POLICY_ALIASES.get(normalized)
+    if policy:
+        return policy
+
+    allowed = ", ".join(
+        [UNSUITABLE_ROW_POLICY_SINGLE_LABEL_ONLY, UNSUITABLE_ROW_POLICY_KEEP_ALL]
+    )
+    raise EvaluationError(
+        f"Unsupported JOB_EVAL_UNSUITABLE_ROW_POLICY {value!r}. Use one of: {allowed}."
+    )
+
+
+def should_remove_rejected_rows(policy: str) -> bool:
+    """Return true when final output should keep only one-label rejections."""
+    return policy == UNSUITABLE_ROW_POLICY_SINGLE_LABEL_ONLY
 
 
 def parse_source(value: str | None, google_sheet_id: str, env: EnvSettings) -> str:
@@ -190,6 +232,7 @@ def write_outputs(
     evaluations: dict[int, JobEvaluation],
     *,
     cleanup_columns: bool = True,
+    remove_rejected_rows: bool = True,
 ) -> None:
     """Write evaluator headers and result values back to the selected source."""
     if source == "excel":
@@ -201,6 +244,7 @@ def write_outputs(
             header_map,
             evaluations,
             cleanup_columns=cleanup_columns,
+            remove_rejected_rows=remove_rejected_rows,
         )
     else:
         write_google_output(
@@ -211,6 +255,7 @@ def write_outputs(
             header_map,
             evaluations,
             cleanup_columns=cleanup_columns,
+            remove_rejected_rows=remove_rejected_rows,
         )
 
 
@@ -233,9 +278,11 @@ def run_evaluation(options: EvaluationOptions) -> EvaluationSummary:
 
     headers, header_map = ensure_output_columns(headers)
     records, skipped_existing = extract_job_records(headers, rows)
+    remove_rejected_rows = should_remove_rejected_rows(options.unsuitable_row_policy)
 
     LOGGER.info("Sheet: %s", sheet_name)
     LOGGER.info("Rows queued: %s", len(records))
+    LOGGER.info("Unsuitable row policy: %s", options.unsuitable_row_policy)
     if skipped_existing:
         LOGGER.info(
             "Rows skipped because AI Verdict already exists: %s",
@@ -255,6 +302,7 @@ def run_evaluation(options: EvaluationOptions) -> EvaluationSummary:
             headers,
             header_map,
             {},
+            remove_rejected_rows=remove_rejected_rows,
         )
         return EvaluationSummary(
             source=source,
@@ -301,6 +349,7 @@ def run_evaluation(options: EvaluationOptions) -> EvaluationSummary:
             header_map,
             dict(pending_evaluations),
             cleanup_columns=cleanup_columns,
+            remove_rejected_rows=remove_rejected_rows,
         )
         pending_evaluations.clear()
 
@@ -340,6 +389,7 @@ def run_evaluation(options: EvaluationOptions) -> EvaluationSummary:
         header_map,
         {},
         cleanup_columns=True,
+        remove_rejected_rows=remove_rejected_rows,
     )
     if source == "excel":
         LOGGER.info(

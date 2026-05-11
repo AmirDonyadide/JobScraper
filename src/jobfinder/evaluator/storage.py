@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Any
 
@@ -19,6 +20,9 @@ from jobfinder.evaluator.models import (
 from jobfinder.evaluator.parsing import normalize_header, trim_trailing_blank_headers
 from jobfinder.google_sheets import build_google_sheets_service, quote_sheet_name
 from jobfinder.paths import GOOGLE_SPREADSHEET_ID_FILE
+
+LABEL_SEPARATOR_RE = re.compile(r"[;\n]+")
+LIST_MARKER_RE = re.compile(r"^\s*(?:[-*]|\d+[.)])\s*")
 
 
 def resolve_sheet_name(existing_names: list[str], requested: str) -> str:
@@ -84,6 +88,82 @@ def remove_excel_columns_after_evaluation(worksheet: Any, headers: list[str]) ->
         worksheet.delete_cols(column_idx + 1)
 
 
+def header_index(headers: list[str], column_name: str) -> int | None:
+    """Return the zero-based index for a normalized header name."""
+    normalized_name = normalize_header(column_name)
+    for idx, header in enumerate(headers):
+        if normalize_header(header) == normalized_name:
+            return idx
+    return None
+
+
+def cell_text(value: Any) -> str:
+    """Return a normalized text value for row-removal decisions."""
+    return "" if value is None else str(value).strip()
+
+
+def unsuitable_reason_label_count(value: Any) -> int:
+    """Count semicolon or line separated unsuitable-reason labels."""
+    text = cell_text(value)
+    if not text:
+        return 0
+    labels = []
+    for part in LABEL_SEPARATOR_RE.split(text):
+        label = LIST_MARKER_RE.sub("", part).strip()
+        if label:
+            labels.append(label)
+    return len(labels)
+
+
+def should_remove_after_evaluation(verdict: Any, unsuitable_reasons: Any) -> bool:
+    """Return true for not-suitable rows without exactly one rejection label."""
+    if cell_text(verdict).casefold() != "not suitable":
+        return False
+    return unsuitable_reason_label_count(unsuitable_reasons) != 1
+
+
+def row_value(row: list[Any], idx: int | None) -> Any:
+    """Return a row value or an empty string when the index is unavailable."""
+    if idx is None or idx >= len(row):
+        return ""
+    return row[idx]
+
+
+def row_numbers_to_remove_after_evaluation(
+    headers: list[str],
+    rows: list[list[Any]],
+) -> list[int]:
+    """Return one-based worksheet row numbers to remove after final evaluation."""
+    verdict_idx = header_index(headers, "AI Verdict")
+    unsuitable_reasons_idx = header_index(headers, "AI Unsuitable Reasons")
+    if verdict_idx is None or unsuitable_reasons_idx is None:
+        return []
+
+    return [
+        row_number
+        for row_number, row in enumerate(rows, start=2)
+        if should_remove_after_evaluation(
+            row_value(row, verdict_idx),
+            row_value(row, unsuitable_reasons_idx),
+        )
+    ]
+
+
+def remove_excel_rows_after_evaluation(worksheet: Any, headers: list[str]) -> None:
+    """Delete not-suitable Excel rows unless they have exactly one label."""
+    verdict_idx = header_index(headers, "AI Verdict")
+    unsuitable_reasons_idx = header_index(headers, "AI Unsuitable Reasons")
+    if verdict_idx is None or unsuitable_reasons_idx is None:
+        return
+
+    for row_idx in range(worksheet.max_row, 1, -1):
+        if should_remove_after_evaluation(
+            worksheet.cell(row=row_idx, column=verdict_idx + 1).value,
+            worksheet.cell(row=row_idx, column=unsuitable_reasons_idx + 1).value,
+        ):
+            worksheet.delete_rows(row_idx)
+
+
 def write_excel_output(
     workbook: Any,
     worksheet: Any,
@@ -93,6 +173,7 @@ def write_excel_output(
     evaluations: dict[int, JobEvaluation],
     *,
     cleanup_columns: bool = True,
+    remove_rejected_rows: bool = True,
 ) -> None:
     """Write evaluator columns and results back to an Excel worksheet."""
     for col_idx, header in enumerate(headers, start=1):
@@ -107,6 +188,8 @@ def write_excel_output(
             ).value = evaluation.value_for_column(column)
 
     if cleanup_columns:
+        if remove_rejected_rows:
+            remove_excel_rows_after_evaluation(worksheet, headers)
         remove_excel_columns_after_evaluation(worksheet, headers)
     workbook.save(path)
 
@@ -170,6 +253,7 @@ def write_google_output(
     evaluations: dict[int, JobEvaluation],
     *,
     cleanup_columns: bool = True,
+    remove_rejected_rows: bool = True,
 ) -> None:
     """Write evaluator columns and results back to a Google Sheet tab."""
     data = []
@@ -203,6 +287,12 @@ def write_google_output(
         ).execute()
 
     if cleanup_columns:
+        if remove_rejected_rows:
+            remove_google_rows_after_evaluation(
+                service,
+                spreadsheet_id,
+                sheet_name,
+            )
         remove_google_columns_after_evaluation(
             service,
             spreadsheet_id,
@@ -223,6 +313,48 @@ def get_google_sheet_id(service: Any, spreadsheet_id: str, sheet_name: str) -> i
         if properties.get("title") == sheet_name:
             return int(properties["sheetId"])
     raise EvaluationError(f"Google Sheet tab '{sheet_name}' was not found.")
+
+
+def remove_google_rows_after_evaluation(
+    service: Any,
+    spreadsheet_id: str,
+    sheet_name: str,
+) -> None:
+    """Delete not-suitable Google Sheet rows unless they have exactly one label."""
+    response = (
+        service.spreadsheets()
+        .values()
+        .get(spreadsheetId=spreadsheet_id, range=quote_sheet_name(sheet_name))
+        .execute()
+    )
+    values = response.get("values", [])
+    if not values:
+        return
+
+    headers = trim_trailing_blank_headers(values[0])
+    rows = [list(row) for row in values[1:]]
+    row_numbers = row_numbers_to_remove_after_evaluation(headers, rows)
+    if not row_numbers:
+        return
+
+    sheet_id = get_google_sheet_id(service, spreadsheet_id, sheet_name)
+    requests = [
+        {
+            "deleteDimension": {
+                "range": {
+                    "sheetId": sheet_id,
+                    "dimension": "ROWS",
+                    "startIndex": row_number - 1,
+                    "endIndex": row_number,
+                }
+            }
+        }
+        for row_number in sorted(row_numbers, reverse=True)
+    ]
+    service.spreadsheets().batchUpdate(
+        spreadsheetId=spreadsheet_id,
+        body={"requests": requests},
+    ).execute()
 
 
 def remove_google_columns_after_evaluation(

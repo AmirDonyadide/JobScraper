@@ -20,6 +20,14 @@ on:
         options:
           - scrape_and_evaluate
           - scrape_only
+      unsuitable_rows:
+        description: "Not-suitable rows in the final output"
+        required: true
+        default: "single_label_only"
+        type: choice
+        options:
+          - single_label_only
+          - keep_all
 
   schedule:
     # Runs once daily during the 07:00 UTC hour. Avoid minute 0 because GitHub
@@ -66,6 +74,7 @@ jobs:
       JOB_EVAL_BATCH_SIZE: "40"
       JOB_EVAL_LARGE_QUEUE_THRESHOLD: "200"
       JOB_EVAL_LARGE_QUEUE_SLEEP_MS: "2000"
+      JOB_EVAL_UNSUITABLE_ROW_POLICY: ${{ github.event.inputs.unsuitable_rows || 'single_label_only' }}
       JOBFINDER_PIPELINE_REPORT_FILE: reports/pipeline_preflight.json
       JOBFINDER_SCRAPER_REPORT_FILE: reports/scraper.json
       JOBFINDER_EVALUATOR_REPORT_FILE: reports/evaluator.json
@@ -232,6 +241,7 @@ jobs:
           echo "Apify retry base delay: ${APIFY_RETRY_DELAY_SECONDS}s"
           echo "Evaluator model: ${JOB_EVAL_OPENAI_MODEL}"
           echo "Evaluator concurrency: ${JOB_EVAL_CONCURRENCY}"
+          echo "Unsuitable row policy: ${JOB_EVAL_UNSUITABLE_ROW_POLICY}"
 
           python -u run_job_pipeline.py --mode "${JOBFINDER_PIPELINE_MODE}" 2>&1 | tee pipeline.log
           status=${PIPESTATUS[0]}
@@ -242,6 +252,7 @@ jobs:
             echo "- Status: $([ "$status" -eq 0 ] && echo succeeded || echo failed)"
             echo "- Pipeline mode: ${JOBFINDER_PIPELINE_MODE}"
             echo "- Job sources: ${JOBSCRAPER_SOURCES}"
+            echo "- Unsuitable row policy: ${JOB_EVAL_UNSUITABLE_ROW_POLICY}"
             echo "- Started at: $(date +'%Y-%m-%dT%H:%M:%S%z')"
             echo "- GitHub run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
           } > reports/workflow_summary.md
@@ -255,7 +266,7 @@ jobs:
 
       - name: Upload run reports
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: jobfinder-run-reports
           path: |

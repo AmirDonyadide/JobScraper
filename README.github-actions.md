@@ -188,6 +188,11 @@ Choose the pipeline mode:
 - `scrape_and_evaluate`: scrape jobs, then evaluate them with OpenAI.
 - `scrape_only`: create the new scraped Google Sheet tab without OpenAI evaluation.
 
+Choose the unsuitable-row policy:
+
+- `single_label_only`: keep `Not Suitable` rows with exactly one unsuitable-reason label, and remove the rest.
+- `keep_all`: keep every evaluated row, including all `Not Suitable` rows.
+
 Click **Run workflow**.
 
 The workflow creates a new dated tab in your Google Sheet. In
@@ -208,6 +213,9 @@ GitHub may delay scheduled workflows slightly. That is normal.
 
 To change the schedule, edit the `cron` value in `.github/workflows/jobs.yml`,
 commit the change, and push it to GitHub.
+
+Scheduled runs always use `single_label_only`, so the final tab keeps
+`Not Suitable` rows only when they have exactly one unsuitable-reason label.
 
 ## 8. Runtime Settings In GitHub Actions
 
@@ -231,6 +239,7 @@ JOB_EVAL_CONCURRENCY: "8"
 JOB_EVAL_BATCH_SIZE: "40"
 JOB_EVAL_LARGE_QUEUE_THRESHOLD: "200"
 JOB_EVAL_LARGE_QUEUE_SLEEP_MS: "2000"
+JOB_EVAL_UNSUITABLE_ROW_POLICY: ${{ github.event.inputs.unsuitable_rows || 'single_label_only' }}
 ```
 
 This keeps 15 Apify keyword searches running in parallel, with 512 MB assigned
@@ -256,6 +265,8 @@ JOB_EVAL_BATCH_SIZE: "20"
 - The Google Sheet receives a new dated tab for each run.
 - `scrape_only` stops after writing scraped rows.
 - `scrape_and_evaluate` writes final AI values back to the same tab.
+- By default, the final tab keeps only one-label `Not Suitable` rows.
+- Manual workflow runs can choose `keep_all` to preserve every evaluated row.
 - The workflow uploads `jobfinder-run-reports` artifacts with JSON reports and a Markdown run summary.
 - Private runtime files are removed from the GitHub runner in the final cleanup step.
 
