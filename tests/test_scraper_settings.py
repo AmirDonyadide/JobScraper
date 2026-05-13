@@ -21,9 +21,7 @@ def test_parse_apify_api_tokens_supports_one_to_twelve_tokens():
 
 def test_parse_apify_api_tokens_rejects_more_than_twelve_tokens():
     """Accidentally pasting too many tokens should fail before scraping starts."""
-    raw_tokens = [
-        f"apify_api_{idx}" for idx in range(1, MAX_APIFY_API_TOKENS + 2)
-    ]
+    raw_tokens = [f"apify_api_{idx}" for idx in range(1, MAX_APIFY_API_TOKENS + 2)]
 
     with pytest.raises(RuntimeError, match="at most 12"):
         parse_apify_api_tokens(";".join(raw_tokens))

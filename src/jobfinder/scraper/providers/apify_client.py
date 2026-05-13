@@ -195,8 +195,7 @@ def check_apify_response(
                 f"access is active. Apify said: {message}"
             )
         raise ApifyAccountUnavailableError(
-            f"Apify said {token_label} cannot pay for {actor_id}. "
-            f"Apify said: {message}"
+            f"Apify said {token_label} cannot pay for {actor_id}. Apify said: {message}"
         )
 
     if is_retryable_apify_response(response):
