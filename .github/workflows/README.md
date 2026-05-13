@@ -13,7 +13,7 @@ Runs on:
 Checks:
 
 1. Checkout.
-2. Set up Python 3.11 with pip cache.
+2. Set up Python 3.14 with pip cache.
 3. Install `requirements-dev.txt`.
 4. Run Ruff lint.
 5. Run Ruff formatting check.
@@ -49,7 +49,7 @@ Manual inputs:
 
 ```mermaid
 flowchart TD
-    A["checkout"] --> B["setup Python 3.11"]
+    A["checkout"] --> B["setup Python 3.14"]
     B --> C["install requirements.txt"]
     C --> D["validate required secrets"]
     D --> E["write private keyword/prompt/CV files"]

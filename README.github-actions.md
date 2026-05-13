@@ -50,7 +50,7 @@ The workflow is defined in:
 It runs the pipeline on GitHub:
 
 1. Checks out the repository.
-2. Sets up Python 3.11.
+2. Sets up Python 3.14.
 3. Installs dependencies from `requirements.txt`.
 4. Validates required GitHub secrets.
 5. Writes private keywords, prompt, CV, and Google credentials into temporary runner files.

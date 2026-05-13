@@ -209,18 +209,17 @@ Default evaluator policy:
 
 ### Requirements
 
-- Python 3.11 or newer.
+- Python 3.14 or newer.
 - Apify API token for scraping.
 - OpenAI API key for `scrape_and_evaluate` or evaluator-only runs.
 - Google service account and editable Google Sheet for the full pipeline.
 - Optional local Excel workflow through `openpyxl`.
 
-Install runtime dependencies:
+Install runtime dependencies with Conda:
 
 ```bash
-python -m venv .venv
-source .venv/bin/activate
-python -m pip install --upgrade pip
+conda create -n JobFinder python=3.14 -y
+conda activate JobFinder
 python -m pip install -r requirements.txt
 ```
 

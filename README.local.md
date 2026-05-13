@@ -32,7 +32,7 @@ while the job is running.
 
 ## Prerequisites
 
-- Python 3.11 or newer.
+- Python 3.14 or newer.
 - An Apify API token.
 - An OpenAI API key when running evaluation.
 - A Google service account and Google Sheet when using the full pipeline.
@@ -45,18 +45,8 @@ Run all commands from the repository root.
 With Conda:
 
 ```bash
-conda create -n jobfinder python=3.11 -y
-conda activate jobfinder
-python -m pip install -r requirements.txt
-cp .env.example .env
-```
-
-Or with `venv`:
-
-```bash
-python -m venv .venv
-source .venv/bin/activate
-python -m pip install --upgrade pip
+conda create -n JobFinder python=3.14 -y
+conda activate JobFinder
 python -m pip install -r requirements.txt
 cp .env.example .env
 ```
