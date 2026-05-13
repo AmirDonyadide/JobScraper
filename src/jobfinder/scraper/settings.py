@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -36,18 +37,24 @@ DEFAULT_APIFY_RETRY_DELAY_SECONDS = 30
 LINKEDIN_ACTOR_ID = "curious_coder~linkedin-jobs-scraper"
 INDEED_ACTOR_ID = "valig~indeed-jobs-scraper"
 INDEED_MAX_RESULTS_LIMIT = 1000
+STEPSTONE_ACTOR_ID = "memo23~stepstone-search-cheerio-ppr"
 
-SOURCE_ORDER = ("linkedin", "indeed")
+SOURCE_ORDER = ("linkedin", "indeed", "stepstone")
 SOURCE_DISPLAY_NAMES = {
     "linkedin": "LinkedIn",
     "indeed": "Indeed",
+    "stepstone": "Stepstone",
 }
 SOURCE_ALIASES = {
     "linkedin": {"linkedin"},
     "li": {"linkedin"},
     "indeed": {"indeed"},
+    "stepstone": {"stepstone"},
+    "stepstone_de": {"stepstone"},
+    "stepstone-de": {"stepstone"},
+    "ss": {"stepstone"},
     "both": {"linkedin", "indeed"},
-    "all": {"linkedin", "indeed"},
+    "all": {"linkedin", "indeed", "stepstone"},
 }
 OUTPUT_MODE_ALIASES = {
     "excel": {"excel"},
@@ -146,6 +153,15 @@ class ScraperSettings:
     indeed_location: str
     indeed_max_concurrency: int
     indeed_save_only_unique_items: bool
+    stepstone_location: str
+    stepstone_category: str
+    stepstone_start_urls: list[str]
+    stepstone_max_results_per_search: int
+    stepstone_max_concurrency: int
+    stepstone_min_concurrency: int
+    stepstone_max_request_retries: int
+    stepstone_use_apify_proxy: bool
+    stepstone_proxy_groups: list[str]
     source_actor_ids: dict[str, str]
     source_max_items: dict[str, int]
 
@@ -187,6 +203,10 @@ def load_scraper_settings(env: EnvSettings | None = None) -> ScraperSettings:
             1,
             env.get_int("INDEED_MAX_RESULTS_PER_SEARCH", max_results_per_search),
         ),
+    )
+    stepstone_max_results = max(
+        1,
+        env.get_int("STEPSTONE_MAX_RESULTS_PER_SEARCH", max_results_per_search),
     )
     apify_run_timeout_seconds = max(
         60,
@@ -304,13 +324,36 @@ def load_scraper_settings(env: EnvSettings | None = None) -> ScraperSettings:
         indeed_save_only_unique_items=env.get_bool(
             "INDEED_SAVE_ONLY_UNIQUE_ITEMS", True
         ),
+        stepstone_location=env.get(
+            "STEPSTONE_LOCATION",
+            config_str(filter_config, "stepstone_search", "location", "deutschland"),
+        ),
+        stepstone_category=env.get(
+            "STEPSTONE_CATEGORY",
+            config_str(filter_config, "stepstone_search", "category", ""),
+        ),
+        stepstone_start_urls=parse_env_list(env.get("STEPSTONE_START_URLS"))
+        or config_list(filter_config, "stepstone_search", "start_urls", []),
+        stepstone_max_results_per_search=stepstone_max_results,
+        stepstone_max_concurrency=max(1, env.get_int("STEPSTONE_MAX_CONCURRENCY", 10)),
+        stepstone_min_concurrency=max(1, env.get_int("STEPSTONE_MIN_CONCURRENCY", 1)),
+        stepstone_max_request_retries=max(
+            0,
+            env.get_int("STEPSTONE_MAX_REQUEST_RETRIES", 3),
+        ),
+        stepstone_use_apify_proxy=env.get_bool("STEPSTONE_USE_APIFY_PROXY", True),
+        stepstone_proxy_groups=parse_env_list(
+            env.get("STEPSTONE_APIFY_PROXY_GROUPS", "RESIDENTIAL")
+        ),
         source_actor_ids={
             "linkedin": LINKEDIN_ACTOR_ID,
             "indeed": INDEED_ACTOR_ID,
+            "stepstone": STEPSTONE_ACTOR_ID,
         },
         source_max_items={
             "linkedin": max_results_per_search,
             "indeed": indeed_max_results,
+            "stepstone": stepstone_max_results,
         },
     )
 
@@ -336,6 +379,14 @@ def parse_posted_time_window(value: str | None) -> str:
     raise RuntimeError(
         f"Unsupported JOBSCRAPER_POSTED_TIME_WINDOW {value!r}. Use one of: {allowed}."
     )
+
+
+def parse_env_list(value: str | None) -> list[str]:
+    """Parse comma/newline separated environment settings."""
+    if not value:
+        return []
+    items = re.split(r"[\n,]+", value)
+    return [item.strip() for item in items if item.strip()]
 
 
 def load_timezone(value: str, setting_name: str) -> ZoneInfo:

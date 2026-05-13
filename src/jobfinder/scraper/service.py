@@ -131,6 +131,8 @@ def run_scrape(settings: ScraperSettings) -> ScrapeResult:
         LOGGER.info("LinkedIn actor: %s.", settings.source_actor_ids["linkedin"])
     if "indeed" in job_sources:
         LOGGER.info("Indeed actor: %s.", settings.source_actor_ids["indeed"])
+    if "stepstone" in job_sources:
+        LOGGER.info("Stepstone actor: %s.", settings.source_actor_ids["stepstone"])
     LOGGER.info("Search source: %s.", search_source)
     LOGGER.info("Output mode: %s.", ", ".join(sorted(output_modes)))
     LOGGER.info("Timezone: %s.", settings.scraper_timezone)
@@ -192,6 +194,23 @@ def run_scrape(settings: ScraperSettings) -> ScrapeResult:
         LOGGER.info(
             "Indeed save unique only: %s.",
             settings.indeed_save_only_unique_items,
+        )
+    if "stepstone" in job_sources:
+        LOGGER.info("Stepstone location: %s.", settings.stepstone_location)
+        if settings.stepstone_start_urls:
+            LOGGER.info(
+                "Stepstone direct URL searches: %s.",
+                len(settings.stepstone_start_urls),
+            )
+        elif settings.stepstone_category:
+            LOGGER.info("Stepstone category fallback: %s.", settings.stepstone_category)
+        LOGGER.info(
+            "Stepstone max results/search: %s.",
+            settings.stepstone_max_results_per_search,
+        )
+        LOGGER.info(
+            "Stepstone actor concurrency: %s.",
+            settings.stepstone_max_concurrency,
         )
 
     all_results, zero_searches, failed_sources, skipped_searches = run_all_searches(

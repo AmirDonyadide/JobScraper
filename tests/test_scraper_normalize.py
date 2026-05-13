@@ -48,3 +48,22 @@ def test_merge_and_deduplicate_uses_indeed_actor_key():
 
     assert len(merged) == 1
     assert merged[0]["keywords_matched"] == ["GIS", "Python"]
+
+
+def test_merge_and_deduplicate_uses_stepstone_actor_id():
+    """Stepstone IDs should behave like source-native job IDs."""
+    jobs = [
+        (
+            "GIS",
+            [{"_source": "stepstone", "stepstoneId": "12424623", "title": "Analyst"}],
+        ),
+        (
+            "Python",
+            [{"_source": "stepstone", "id": "12424623", "title": "Analyst"}],
+        ),
+    ]
+
+    merged = merge_and_deduplicate(jobs)
+
+    assert len(merged) == 1
+    assert merged[0]["keywords_matched"] == ["GIS", "Python"]

@@ -70,6 +70,15 @@ def make_settings(run_started_at: datetime) -> ScraperSettings:
         indeed_location="Germany",
         indeed_max_concurrency=5,
         indeed_save_only_unique_items=True,
+        stepstone_location="deutschland",
+        stepstone_category="",
+        stepstone_start_urls=[],
+        stepstone_max_results_per_search=500,
+        stepstone_max_concurrency=10,
+        stepstone_min_concurrency=1,
+        stepstone_max_request_retries=3,
+        stepstone_use_apify_proxy=True,
+        stepstone_proxy_groups=["RESIDENTIAL"],
         source_actor_ids={"linkedin": "actor"},
         source_max_items={"linkedin": 500},
     )
@@ -239,6 +248,53 @@ def test_remove_jobs_seen_in_history_uses_new_indeed_key():
     )
 
     assert [job["key"] for job in kept] == ["xyz999"]
+    assert duplicate_count == 1
+
+
+def test_remove_jobs_seen_in_history_uses_stepstone_url_key():
+    """Stepstone jobs should dedupe against previous hyperlink formulas."""
+    berlin = ZoneInfo("Europe/Berlin")
+    settings = make_settings(datetime(2026, 5, 6, 10, 0, tzinfo=berlin))
+    historical_keys = job_identity_keys_from_values(
+        source="Stepstone",
+        title="IT Administrator",
+        company="LOW Teq GmbH",
+        location="Cologne",
+        job_url=(
+            '=HYPERLINK("https://www.stepstone.de/stellenangebote--IT-'
+            'Administrator--12424623-inline.html?rltr=1", "Open Job")'
+        ),
+    )
+    jobs = [
+        {
+            "_source": "stepstone",
+            "_source_label": "Stepstone",
+            "id": "12424623",
+            "title": "IT Administrator",
+            "companyName": "LOW Teq GmbH",
+            "location": "Cologne",
+            "url": (
+                "https://www.stepstone.de/stellenangebote--IT-Administrator--"
+                "12424623-inline.html?rltr=2"
+            ),
+        },
+        {
+            "_source": "stepstone",
+            "_source_label": "Stepstone",
+            "id": "999999",
+            "title": "GIS Analyst",
+            "companyName": "GeoCo",
+            "location": "Munich",
+        },
+    ]
+
+    kept, duplicate_count = remove_jobs_seen_in_history(
+        settings,
+        jobs,
+        historical_keys,
+    )
+
+    assert [job["id"] for job in kept] == ["999999"]
     assert duplicate_count == 1
 
 

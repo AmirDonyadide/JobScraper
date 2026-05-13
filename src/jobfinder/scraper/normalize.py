@@ -180,7 +180,7 @@ def get_location(job: dict[str, Any]) -> str:
 
 def get_job_url(settings: ScraperSettings, job: dict[str, Any]) -> str:
     """Return the best available public job URL."""
-    if job.get("_source") == "indeed":
+    if job.get("_source") in {"indeed", "stepstone"}:
         url = (
             job.get("url")
             or job.get("link")
@@ -211,7 +211,8 @@ def get_job_url(settings: ScraperSettings, job: dict[str, Any]) -> str:
     if job_id:
         if job.get("_source") == "indeed":
             return f"{indeed_base_url(settings)}/viewjob?jk={job_id}"
-        return f"https://www.linkedin.com/jobs/view/{job_id}/"
+        if job.get("_source") == "linkedin":
+            return f"https://www.linkedin.com/jobs/view/{job_id}/"
     return "N/A"
 
 
@@ -458,6 +459,8 @@ def make_dedup_key(job: dict[str, Any]) -> str:
         job.get("jobId")
         or job.get("job_id")
         or job.get("indeedKey")
+        or job.get("stepstoneId")
+        or job.get("harmonisedId")
         or job.get("key")
         or job.get("jobKey")
         or job.get("id")

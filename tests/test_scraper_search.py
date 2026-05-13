@@ -16,6 +16,8 @@ from jobfinder.scraper.search import (
     SearchRequest,
     apify_http_timeout,
     fetch_jobs_for_search,
+    get_searches,
+    parse_job_sources,
     run_actor,
     run_all_searches,
 )
@@ -58,6 +60,24 @@ def make_settings() -> SimpleNamespace:
         split_by_location=False,
         split_country="DE",
         indeed_max_concurrency=5,
+        published_at="r86400",
+        stepstone_location="deutschland",
+        stepstone_category="",
+        stepstone_max_concurrency=10,
+        stepstone_min_concurrency=1,
+        stepstone_max_request_retries=3,
+        stepstone_max_results_per_search=500,
+        stepstone_use_apify_proxy=True,
+        stepstone_proxy_groups=["RESIDENTIAL"],
+        stepstone_start_urls=[],
+        source_actor_ids={
+            "linkedin": "linkedin~actor",
+            "indeed": "indeed~actor",
+            "stepstone": "stepstone~actor",
+        },
+        source_max_items={"linkedin": 500, "indeed": 500, "stepstone": 500},
+        keywords=["GIS", "Python"],
+        source_mode="linkedin",
     )
 
 
@@ -305,3 +325,136 @@ def test_run_all_searches_respects_indeed_source_concurrency(monkeypatch):
     assert zero_searches == []
     assert failed_sources == {}
     assert skipped_searches == []
+
+
+def test_parse_job_sources_supports_stepstone_and_comma_lists():
+    """Users should be able to mix Stepstone with existing providers explicitly."""
+    settings = make_settings()
+    settings.source_mode = "linkedin,stepstone"
+
+    assert parse_job_sources(settings) == ["linkedin", "stepstone"]
+
+    settings.source_mode = "all"
+    assert parse_job_sources(settings) == ["linkedin", "indeed", "stepstone"]
+
+
+def test_get_searches_uses_one_stepstone_run_for_direct_urls():
+    """Direct URL mode should not duplicate the same Stepstone URL per keyword."""
+    settings = make_settings()
+    settings.stepstone_start_urls = ["https://www.stepstone.de/jobs/software"]
+
+    _, searches = get_searches(settings, ["stepstone"])
+
+    assert len(searches) == 1
+    assert searches[0].source == "stepstone"
+    assert searches[0].keyword == "Configured URLs"
+    assert searches[0].payload["startUrls"] == [
+        {"url": "https://www.stepstone.de/jobs/software"}
+    ]
+
+
+def test_run_all_searches_respects_stepstone_source_concurrency(monkeypatch):
+    """Stepstone actor runs should be bounded separately from global concurrency."""
+    settings = make_settings()
+    settings.search_concurrency = 6
+    settings.stepstone_max_concurrency = 2
+    active_count = 0
+    max_active_count = 0
+    lock = threading.Lock()
+
+    def fake_run_actor(settings, actor_id, payload, max_items):
+        nonlocal active_count, max_active_count
+        with lock:
+            active_count += 1
+            max_active_count = max(max_active_count, active_count)
+        time.sleep(0.02)
+        with lock:
+            active_count -= 1
+        return [{"title": payload["keyword"], "id": payload["keyword"]}]
+
+    monkeypatch.setattr("jobfinder.scraper.search.run_actor", fake_run_actor)
+
+    results, zero_searches, failed_sources, skipped_searches = run_all_searches(
+        settings,
+        [
+            SearchRequest(
+                source="stepstone",
+                source_label="Stepstone",
+                keyword=f"Keyword {idx}",
+                display_label=f"Stepstone / Keyword {idx}",
+                actor_id="memo23~stepstone-search-cheerio-ppr",
+                payload={"keyword": f"Keyword {idx}"},
+                max_items=500,
+            )
+            for idx in range(6)
+        ],
+    )
+
+    assert max_active_count <= 2
+    assert [keyword for keyword, _ in results] == [f"Keyword {idx}" for idx in range(6)]
+    assert zero_searches == []
+    assert failed_sources == {}
+    assert skipped_searches == []
+
+
+def test_run_all_searches_continues_when_stepstone_source_fails(monkeypatch):
+    """A Stepstone failure should not take down already working providers."""
+    settings = make_settings()
+    settings.search_concurrency = 2
+
+    def fake_run_actor(settings, actor_id, payload, max_items):
+        if actor_id == "memo23~stepstone-search-cheerio-ppr":
+            raise RuntimeError("temporary Stepstone issue")
+        return [{"title": payload["keyword"], "jobId": payload["keyword"]}]
+
+    monkeypatch.setattr("jobfinder.scraper.search.run_actor", fake_run_actor)
+
+    results, zero_searches, failed_sources, skipped_searches = run_all_searches(
+        settings,
+        [
+            SearchRequest(
+                source="stepstone",
+                source_label="Stepstone",
+                keyword="GIS",
+                display_label="Stepstone / GIS",
+                actor_id="memo23~stepstone-search-cheerio-ppr",
+                payload={"keyword": "GIS"},
+                max_items=500,
+            ),
+            SearchRequest(
+                source="linkedin",
+                source_label="LinkedIn",
+                keyword="GIS",
+                display_label="LinkedIn / GIS",
+                actor_id="curious_coder~linkedin-jobs-scraper",
+                payload={"keyword": "GIS"},
+                max_items=500,
+            ),
+            SearchRequest(
+                source="stepstone",
+                source_label="Stepstone",
+                keyword="Python",
+                display_label="Stepstone / Python",
+                actor_id="memo23~stepstone-search-cheerio-ppr",
+                payload={"keyword": "Python"},
+                max_items=500,
+            ),
+        ],
+    )
+
+    assert results == [
+        (
+            "GIS",
+            [
+                {
+                    "title": "GIS",
+                    "jobId": "GIS",
+                    "_source": "linkedin",
+                    "_source_label": "LinkedIn",
+                }
+            ],
+        )
+    ]
+    assert zero_searches == []
+    assert "stepstone" in failed_sources
+    assert skipped_searches == ["Stepstone / GIS", "Stepstone / Python"]

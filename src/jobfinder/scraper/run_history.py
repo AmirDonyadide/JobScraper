@@ -31,6 +31,10 @@ RUN_SHEET_NAME_RE = re.compile(
     r"^(?P<timestamp>\d{4}-\d{2}-\d{2} \d{2}-\d{2}-\d{2})(?: \(\d+\))?$"
 )
 LINKEDIN_JOB_ID_RE = re.compile(r"/jobs/view/(?P<id>\d+)", re.IGNORECASE)
+STEPSTONE_JOB_ID_RE = re.compile(
+    r"--(?P<id>\d+)(?:-inline)?\.html",
+    re.IGNORECASE,
+)
 HYPERLINK_RE = re.compile(
     r'^=HYPERLINK\("(?P<url>(?:[^"]|"")*)"\s*[,;]\s*"',
     re.IGNORECASE,
@@ -199,6 +203,12 @@ def canonical_job_url(value: Any) -> str:
         if job_keys and job_keys[0]:
             return f"indeed:{job_keys[0].casefold()}"
 
+    if "stepstone." in host:
+        match = STEPSTONE_JOB_ID_RE.search(path)
+        if match:
+            return f"stepstone:{match.group('id')}"
+        return f"{host}{path}".casefold()
+
     return f"{host}{path}".casefold()
 
 
@@ -208,7 +218,7 @@ def job_id_from_url(value: Any) -> str:
     if ":" not in canonical_url:
         return ""
     source, job_id = canonical_url.split(":", 1)
-    if source in {"linkedin", "indeed"}:
+    if source in {"linkedin", "indeed", "stepstone"}:
         return job_id
     return ""
 
@@ -253,6 +263,8 @@ def job_identity_keys(settings: ScraperSettings, job: dict[str, Any]) -> set[str
         job.get("jobId")
         or job.get("job_id")
         or job.get("indeedKey")
+        or job.get("stepstoneId")
+        or job.get("harmonisedId")
         or job.get("key")
         or job.get("jobKey")
         or job.get("id")

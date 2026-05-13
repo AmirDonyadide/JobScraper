@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
@@ -10,7 +11,7 @@ from typing import Any
 
 import requests
 
-from jobfinder.providers import indeed
+from jobfinder.providers import indeed, stepstone
 from jobfinder.scraper.providers import linkedin
 from jobfinder.scraper.providers.apify_client import (
     ApifyConfigurationError,
@@ -43,6 +44,7 @@ __all__ = [
     "build_indeed_actor_input",
     "build_linkedin_actor_input",
     "build_linkedin_search_url",
+    "build_stepstone_actor_input",
     "fetch_jobs_for_search",
     "get_searches",
     "indeed_base_url",
@@ -120,6 +122,14 @@ def build_indeed_actor_input(settings: ScraperSettings, keyword: str) -> dict[st
     return indeed.build_actor_input(settings, keyword)
 
 
+def build_stepstone_actor_input(
+    settings: ScraperSettings,
+    keyword: str,
+) -> dict[str, Any]:
+    """Build the Apify actor payload for Stepstone searches."""
+    return stepstone.build_actor_input(settings, keyword)
+
+
 def build_actor_input(
     settings: ScraperSettings, source: str, keyword: str
 ) -> dict[str, Any]:
@@ -130,6 +140,8 @@ def build_actor_input(
         )
     if source == "indeed":
         return build_indeed_actor_input(settings, keyword)
+    if source == "stepstone":
+        return build_stepstone_actor_input(settings, keyword)
     raise ValueError(f"Unknown job source: {source}")
 
 
@@ -149,7 +161,12 @@ def build_search(settings: ScraperSettings, source: str, keyword: str) -> Search
 
 def parse_job_sources(settings: ScraperSettings) -> list[str]:
     """Resolve selected job sources from environment aliases."""
-    selected = SOURCE_ALIASES.get(settings.source_mode)
+    selected: set[str] = set()
+    raw_parts = re.split(r"[\s,]+", settings.source_mode.strip().casefold())
+    parts = [part for part in raw_parts if part]
+    for part in parts:
+        selected.update(SOURCE_ALIASES.get(part, set()))
+
     if not selected:
         LOGGER.warning(
             "Unknown JOBSCRAPER_SOURCES %r; using LinkedIn only.",
@@ -164,14 +181,36 @@ def get_searches(
     settings: ScraperSettings, sources: list[str]
 ) -> tuple[str, list[SearchRequest]]:
     """Build all source/keyword searches for a scraper run."""
-    searches = [
-        build_search(settings, source, keyword)
-        for source in sources
-        if source in settings.source_actor_ids
-        for keyword in settings.keywords
-    ]
+    searches = []
+    for source in sources:
+        if source not in settings.source_actor_ids:
+            continue
+        searches.extend(build_source_searches(settings, source))
+
     source_labels = ", ".join(source_label(source) for source in sources)
-    return f"generated {source_labels} keyword URLs", searches
+    return f"generated {source_labels} searches", searches
+
+
+def build_source_searches(
+    settings: ScraperSettings,
+    source: str,
+) -> list[SearchRequest]:
+    """Build source-specific searches without changing provider internals."""
+    if source == "stepstone" and settings.stepstone_start_urls:
+        label = source_label(source)
+        return [
+            SearchRequest(
+                source=source,
+                source_label=label,
+                keyword="Configured URLs",
+                display_label=f"{label} / configured URLs",
+                actor_id=settings.source_actor_ids[source],
+                payload=stepstone.build_direct_actor_input(settings),
+                max_items=settings.source_max_items[source],
+            )
+        ]
+
+    return [build_search(settings, source, keyword) for keyword in settings.keywords]
 
 
 def annotate_jobs(
@@ -376,6 +415,14 @@ def run_provider_actor(
             search.max_items,
             actor_runner=run_actor,
         )
+    if search.source == "stepstone":
+        return stepstone.run_actor_search(
+            settings,
+            search.actor_id,
+            search.payload,
+            search.max_items,
+            actor_runner=run_actor,
+        )
 
     return run_actor(
         settings,
@@ -389,6 +436,8 @@ def source_concurrency_limit(settings: ScraperSettings, source: str) -> int:
     """Return the source-specific execution limit for actor runs."""
     if source == "indeed":
         return max(1, settings.indeed_max_concurrency)
+    if source == "stepstone":
+        return max(1, settings.stepstone_max_concurrency)
     return max(1, settings.search_concurrency)
 
 
@@ -485,6 +534,20 @@ def run_all_searches(
                         search.display_label for _, search in batch.searches
                     )
                 except SearchExecutionError as exc:
+                    if batch.source == "stepstone":
+                        if batch.source not in failed_sources:
+                            LOGGER.error("%s", exc)
+                            LOGGER.warning(
+                                "Continuing with other sources. Remaining %s "
+                                "searches will be skipped.",
+                                batch.source_label,
+                            )
+                            failed_sources[batch.source] = str(exc)
+                        skipped_searches.extend(
+                            search.display_label for _, search in batch.searches
+                        )
+                        submit_next(executor, in_flight)
+                        break
                     LOGGER.error("%s", exc)
                     raise
                 else:

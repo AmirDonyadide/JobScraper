@@ -11,7 +11,9 @@ on:
         options:
           - linkedin
           - indeed
+          - stepstone
           - both
+          - all
       posted_time_window:
         description: "Provider posted-time window"
         required: true
@@ -89,6 +91,9 @@ jobs:
       APIFY_RETRY_DELAY_SECONDS: "30"
       JOBSCRAPER_DELAY_BETWEEN_REQUESTS: "0"
       JOBSCRAPER_SCRAPE_COMPANY_DETAILS: "false"
+      STEPSTONE_LOCATION: "deutschland"
+      STEPSTONE_MAX_CONCURRENCY: "10"
+      STEPSTONE_MAX_REQUEST_RETRIES: "3"
       JOBSCRAPER_TIMEZONE: Europe/Berlin
       JOBSCRAPER_POSTED_TIMEZONE: Europe/Berlin
       JOB_EVAL_OPENAI_MODEL: "gpt-5-mini"

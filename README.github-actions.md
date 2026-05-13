@@ -181,7 +181,9 @@ Choose the source:
 
 - `linkedin`
 - `indeed`
+- `stepstone`
 - `both`
+- `all`
 
 Choose the posted-time window:
 
@@ -249,6 +251,9 @@ APIFY_RUN_TIMEOUT_SECONDS: "3600"
 APIFY_CLIENT_TIMEOUT_SECONDS: "120"
 APIFY_TRANSIENT_ERROR_RETRIES: "5"
 APIFY_RETRY_DELAY_SECONDS: "30"
+STEPSTONE_LOCATION: "deutschland"
+STEPSTONE_MAX_CONCURRENCY: "10"
+STEPSTONE_MAX_REQUEST_RETRIES: "3"
 JOBSCRAPER_TIMEZONE: Europe/Berlin
 JOBSCRAPER_POSTED_TIMEZONE: Europe/Berlin
 JOB_EVAL_OPENAI_MODEL: "gpt-5-mini"
@@ -294,7 +299,7 @@ Use repository files for shared, non-secret configuration:
 | Change | Where |
 |---|---|
 | Search source defaults, schedule, speed, timeout, and evaluator concurrency | `.github/workflows/jobs.yml` |
-| LinkedIn location, title exclusions, company exclusions, applicant cap, status words | `configs/filters.json` |
+| LinkedIn and Stepstone search defaults, title exclusions, company exclusions, applicant cap, status words | `configs/filters.json` |
 | Python dependencies | `requirements.txt` |
 
 Use GitHub secrets for private values:

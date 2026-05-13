@@ -1,13 +1,13 @@
 # JobFinder
 
-JobFinder collects recent job postings from Apify-powered LinkedIn and Indeed scrapers, removes duplicates and unwanted results, exports the jobs to Google Sheets or Excel, and evaluates each job with OpenAI using your private prompt and CV.
+JobFinder collects recent job postings from Apify-powered LinkedIn, Indeed, and Stepstone scrapers, removes duplicates and unwanted results, exports the jobs to Google Sheets or Excel, and evaluates each job with OpenAI using your private prompt and CV.
 
 The simplest production workflow is the GitHub Actions workflow. After setup, you can run the whole job search online from GitHub without keeping your laptop open.
 
 ## What JobFinder Does
 
 1. Reads your private keywords from `configs/keywords.txt` or GitHub secrets.
-2. Scrapes matching jobs from LinkedIn, Indeed, or both through Apify.
+2. Scrapes matching jobs from LinkedIn, Indeed, Stepstone, or a selected combination through Apify.
 3. Deduplicates jobs across keywords and previous Google Sheet run tabs.
 4. Removes excluded titles and jobs above the applicant limit.
 5. Writes a new dated tab to Google Sheets.
@@ -67,7 +67,7 @@ The Python package is named `jobfinder` internally. The scraper component remain
 
 When Google Sheets output is enabled, JobFinder reads the existing timestamped tabs before scraping. The newest previous tab name is treated as the previous exact run time in `JOBSCRAPER_TIMEZONE`, which defaults to `Europe/Berlin`.
 
-Provider searches then use the configured posted-time window. LinkedIn uses a dynamic second-based window from the previous run with `JOBSCRAPER_SEARCH_WINDOW_BUFFER_SECONDS` padding; Indeed uses the actor's supported day bucket when the window fits. After scraping, JobFinder filters rows back to the exact previous-run/current-run posted interval, then removes jobs already present in older tabs before the evaluator runs.
+Provider searches then use the configured posted-time window. LinkedIn uses a dynamic second-based window from the previous run with `JOBSCRAPER_SEARCH_WINDOW_BUFFER_SECONDS` padding; Indeed and Stepstone use actor-supported day buckets when the window fits. After scraping, JobFinder filters rows back to the exact previous-run/current-run posted interval, then removes jobs already present in older tabs before the evaluator runs.
 
 Final scraper filters in `configs/filters.json` also remove jobs whose company names contain any `excluded_company_terms`, ignoring case and punctuation.
 
@@ -91,7 +91,7 @@ Scraper output columns before evaluation:
 | Column | Description |
 |---|---|
 | `Application Status` | Empty status cell or Google Sheets dropdown. |
-| `App` | Source app, such as LinkedIn or Indeed. |
+| `App` | Source app, such as LinkedIn, Indeed, or Stepstone. |
 | `Job Title` | Position name. |
 | `Company` | Employer name. |
 | `Location` | City or region. |
