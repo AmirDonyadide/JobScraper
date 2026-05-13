@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import time
+from collections.abc import MutableMapping
 from typing import Any
 
 import requests
@@ -65,7 +66,7 @@ class ApifyTransientError(RuntimeError):
 def apify_headers(
     settings: ScraperSettings,
     token: ApifyTokenSelection | str | None = None,
-) -> dict[str, str | bytes]:
+) -> MutableMapping[str, str | bytes]:
     """Build authorization headers for Apify API calls."""
     return {"Authorization": f"Bearer {apify_token_value(settings, token)}"}
 
