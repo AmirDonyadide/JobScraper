@@ -305,9 +305,7 @@ def job_identity_keys_from_values(
     location_key = normalize_identity_value(location)
     if title_key and company_key and location_key:
         for source_key in source_keys:
-            keys.add(
-                f"profile|{source_key}|{title_key}|{company_key}|{location_key}"
-            )
+            keys.add(f"profile|{source_key}|{title_key}|{company_key}|{location_key}")
         profile_key = source_agnostic_profile_key(title, company, location)
         if profile_key:
             keys.add(profile_key)

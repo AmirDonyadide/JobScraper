@@ -557,8 +557,7 @@ def parse_salary(value: str) -> SalaryRange:
     numbers = [
         parsed
         for match in re.finditer(r"\d+(?:[.,]\d+)?\s*k?", lowered)
-        if (parsed := parse_salary_number(match.group(0).replace(" ", "")))
-        is not None
+        if (parsed := parse_salary_number(match.group(0).replace(" ", ""))) is not None
     ]
     plausible_numbers = [
         number
@@ -607,11 +606,12 @@ def build_strong_keys(
     if apply_url_key:
         keys.add(f"apply|{apply_url_key}")
     if company_url_key and normalized_title and normalized_location:
-        keys.add(f"company_url_profile|{company_url_key}|{normalized_title}|{normalized_location}")
+        keys.add(
+            f"company_url_profile|{company_url_key}|{normalized_title}|{normalized_location}"
+        )
     if normalized_company and normalized_title and normalized_location:
         keys.add(
-            "profile|any|"
-            f"{normalized_company}|{normalized_title}|{normalized_location}"
+            f"profile|any|{normalized_company}|{normalized_title}|{normalized_location}"
         )
         keys.add(
             "profile|"
@@ -644,7 +644,9 @@ def build_blocking_keys(
     if company_url_key:
         keys.add(f"company_url|{company_url_key}")
     if normalized_company and normalized_title and normalized_location:
-        keys.add(f"profile|{normalized_company}|{normalized_title}|{normalized_location}")
+        keys.add(
+            f"profile|{normalized_company}|{normalized_title}|{normalized_location}"
+        )
     if normalized_company and title_tokens:
         keys.add(f"company_title|{normalized_company}|{title_signature(title_tokens)}")
         for token in sorted(title_tokens)[:8]:

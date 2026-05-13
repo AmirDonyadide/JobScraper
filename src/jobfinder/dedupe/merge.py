@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any
 
 from jobfinder.dedupe.models import NormalizedJob, Provenance
@@ -35,6 +36,18 @@ def source_sort_key(label: str) -> tuple[int, str]:
     if key in SOURCE_ORDER:
         return SOURCE_ORDER.index(key), label
     return len(SOURCE_ORDER), label.casefold()
+
+
+def source_label_for_key(key: str) -> str:
+    """Return a display label for a source key."""
+    return KNOWN_SOURCE_LABELS.get(key) or key
+
+
+def posted_sort_key(job: NormalizedJob) -> datetime:
+    """Return a non-optional posted timestamp for already-filtered jobs."""
+    if job.posted_at is None:
+        raise ValueError("posted_sort_key requires a parseable posted_at value")
+    return job.posted_at
 
 
 def merge_keywords(jobs: list[NormalizedJob]) -> list[str]:
@@ -165,7 +178,7 @@ def best_posted(jobs: list[NormalizedJob]) -> str:
     """Choose the newest parseable posted date, falling back to provider text."""
     parseable = [job for job in jobs if job.posted_at is not None]
     if parseable:
-        newest = max(parseable, key=lambda job: job.posted_at or job.posted_at)
+        newest = max(parseable, key=posted_sort_key)
         for key in (
             "postedAt",
             "publishedAt",
@@ -211,9 +224,7 @@ def merge_cluster(jobs: list[NormalizedJob]) -> dict[str, Any]:
             "_source": "|".join(
                 sorted(
                     {job.source for job in jobs},
-                    key=lambda key: source_sort_key(
-                        KNOWN_SOURCE_LABELS.get(key, key)
-                    ),
+                    key=lambda key: source_sort_key(source_label_for_key(key)),
                 )
             ),
             "_source_label": app_value,
