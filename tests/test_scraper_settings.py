@@ -2,8 +2,31 @@
 
 from __future__ import annotations
 
+import pytest
+
 from jobfinder.env import EnvSettings
-from jobfinder.scraper.settings import load_scraper_settings
+from jobfinder.scraper.settings import (
+    MAX_APIFY_API_TOKENS,
+    load_scraper_settings,
+    parse_apify_api_tokens,
+)
+
+
+def test_parse_apify_api_tokens_supports_one_to_twelve_tokens():
+    """The single APIFY_API_TOKEN setting can contain up to twelve tokens."""
+    raw_tokens = [f"apify_api_{idx}" for idx in range(1, MAX_APIFY_API_TOKENS + 1)]
+
+    assert parse_apify_api_tokens(";".join(raw_tokens)) == tuple(raw_tokens)
+
+
+def test_parse_apify_api_tokens_rejects_more_than_twelve_tokens():
+    """Accidentally pasting too many tokens should fail before scraping starts."""
+    raw_tokens = [
+        f"apify_api_{idx}" for idx in range(1, MAX_APIFY_API_TOKENS + 2)
+    ]
+
+    with pytest.raises(RuntimeError, match="at most 12"):
+        parse_apify_api_tokens(";".join(raw_tokens))
 
 
 def test_load_scraper_settings_clamps_provider_payload_limits(monkeypatch):
@@ -41,6 +64,20 @@ def test_load_scraper_settings_clamps_provider_payload_limits(monkeypatch):
     assert settings.search_concurrency == 2
     assert settings.apify_batch_size == 3
     assert settings.source_max_items == {"linkedin": 1, "indeed": 1, "stepstone": 1}
+
+
+def test_load_scraper_settings_reads_semicolon_separated_apify_tokens(monkeypatch):
+    """Settings should keep all tokens and expose the first for compatibility."""
+    monkeypatch.setattr("jobfinder.scraper.settings.load_filter_config", lambda _: {})
+    monkeypatch.setattr("jobfinder.scraper.settings.load_keywords", lambda _: ["GIS"])
+
+    settings = load_scraper_settings(
+        EnvSettings({"APIFY_API_TOKEN": "apify_api_first; apify_api_second"})
+    )
+
+    assert settings.apify_api_token == "apify_api_first"
+    assert settings.apify_api_tokens == ("apify_api_first", "apify_api_second")
+    assert settings.apify_token_pool.total_count == 2
 
 
 def test_load_scraper_settings_reads_manual_posted_time_window(monkeypatch):

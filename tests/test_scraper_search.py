@@ -11,6 +11,7 @@ import pytest
 import requests
 
 from jobfinder.scraper.search import (
+    ApifyConfigurationError,
     ApifyRunTimeoutError,
     SearchExecutionError,
     SearchRequest,
@@ -21,6 +22,7 @@ from jobfinder.scraper.search import (
     run_actor,
     run_all_searches,
 )
+from jobfinder.scraper.settings import ApifyTokenPool
 
 
 class FakeResponse:
@@ -79,6 +81,17 @@ def make_settings() -> SimpleNamespace:
         keywords=["GIS", "Python"],
         source_mode="linkedin",
     )
+
+
+def configure_apify_tokens(
+    settings: SimpleNamespace,
+    *tokens: str,
+) -> SimpleNamespace:
+    """Attach a real token pool to the lightweight search settings double."""
+    settings.apify_api_token = tokens[0] if tokens else ""
+    settings.apify_api_tokens = tuple(tokens)
+    settings.apify_token_pool = ApifyTokenPool(tuple(tokens))
+    return settings
 
 
 def test_run_actor_uses_async_api_and_fetches_dataset(monkeypatch):
@@ -226,6 +239,141 @@ def test_fetch_jobs_for_search_fails_after_retry_budget(monkeypatch):
                 max_items=500,
             ),
         )
+
+
+def test_run_actor_rotates_to_next_apify_token_when_credit_is_empty(monkeypatch):
+    """A 402 billing response should retire that token and retry with the next one."""
+    settings = configure_apify_tokens(
+        make_settings(),
+        "apify_api_empty",
+        "apify_api_funded",
+    )
+    post_authorizations: list[str] = []
+
+    def fake_post(url: str, **kwargs: Any) -> FakeResponse:
+        post_authorizations.append(kwargs["headers"]["Authorization"])
+        if len(post_authorizations) == 1:
+            return FakeResponse(
+                {"error": {"message": "Insufficient credits."}},
+                status_code=402,
+            )
+        return FakeResponse({"data": {"id": "run-2", "defaultDatasetId": "dataset-2"}})
+
+    def fake_get(url: str, **kwargs: Any) -> FakeResponse:
+        if "/actor-runs/" in url:
+            return FakeResponse(
+                {
+                    "data": {
+                        "id": "run-2",
+                        "status": "SUCCEEDED",
+                        "defaultDatasetId": "dataset-2",
+                    }
+                }
+            )
+        return FakeResponse([{"title": "GIS Analyst"}])
+
+    monkeypatch.setattr(
+        "jobfinder.scraper.providers.apify_client.requests.post", fake_post
+    )
+    monkeypatch.setattr(
+        "jobfinder.scraper.providers.apify_client.requests.get", fake_get
+    )
+
+    jobs = run_actor(settings, "owner~actor", {"input": True}, 500)
+
+    assert jobs == [{"title": "GIS Analyst"}]
+    assert post_authorizations == [
+        "Bearer apify_api_empty",
+        "Bearer apify_api_funded",
+    ]
+
+
+def test_run_actor_restarts_with_next_token_when_credit_runs_out(monkeypatch):
+    """A mid-run billing failure should restart the search on the next token."""
+    settings = configure_apify_tokens(
+        make_settings(),
+        "apify_api_empty_mid_run",
+        "apify_api_funded",
+    )
+    post_authorizations: list[str] = []
+    dataset_authorizations: list[str] = []
+
+    def fake_post(url: str, **kwargs: Any) -> FakeResponse:
+        post_authorizations.append(kwargs["headers"]["Authorization"])
+        run_number = len(post_authorizations)
+        return FakeResponse(
+            {
+                "data": {
+                    "id": f"run-{run_number}",
+                    "defaultDatasetId": f"dataset-{run_number}",
+                }
+            }
+        )
+
+    def fake_get(url: str, **kwargs: Any) -> FakeResponse:
+        authorization = kwargs["headers"]["Authorization"]
+        if "/actor-runs/" in url and authorization == "Bearer apify_api_empty_mid_run":
+            return FakeResponse(
+                {
+                    "data": {
+                        "id": "run-1",
+                        "status": "FAILED",
+                        "statusMessage": "Run stopped because of insufficient credits.",
+                    }
+                }
+            )
+        if "/actor-runs/" in url:
+            return FakeResponse(
+                {
+                    "data": {
+                        "id": "run-2",
+                        "status": "SUCCEEDED",
+                        "defaultDatasetId": "dataset-2",
+                    }
+                }
+            )
+        dataset_authorizations.append(authorization)
+        return FakeResponse([{"title": "Python Analyst"}])
+
+    monkeypatch.setattr(
+        "jobfinder.scraper.providers.apify_client.requests.post", fake_post
+    )
+    monkeypatch.setattr(
+        "jobfinder.scraper.providers.apify_client.requests.get", fake_get
+    )
+
+    jobs = run_actor(settings, "owner~actor", {"input": True}, 500)
+
+    assert jobs == [{"title": "Python Analyst"}]
+    assert post_authorizations == [
+        "Bearer apify_api_empty_mid_run",
+        "Bearer apify_api_funded",
+    ]
+    assert dataset_authorizations == ["Bearer apify_api_funded"]
+
+
+def test_run_actor_fails_when_all_apify_tokens_are_unavailable(monkeypatch):
+    """A clear configuration error should be raised after every token fails."""
+    settings = configure_apify_tokens(
+        make_settings(),
+        "apify_api_empty_1",
+        "apify_api_empty_2",
+    )
+
+    def fake_post(url: str, **kwargs: Any) -> FakeResponse:
+        return FakeResponse(
+            {"error": {"message": "Payment required."}},
+            status_code=402,
+        )
+
+    monkeypatch.setattr(
+        "jobfinder.scraper.providers.apify_client.requests.post", fake_post
+    )
+
+    with pytest.raises(ApifyConfigurationError) as excinfo:
+        run_actor(settings, "owner~actor", {"input": True}, 500)
+
+    assert "Tried 2 token(s)" in str(excinfo.value)
 
 
 def test_run_all_searches_batches_linkedin_when_results_are_attributable(monkeypatch):

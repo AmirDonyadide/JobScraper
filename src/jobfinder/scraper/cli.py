@@ -67,7 +67,7 @@ def main() -> int:
         )
         return 1
 
-    if not settings.apify_api_token or settings.apify_api_token == TOKEN_PLACEHOLDER:
+    if not settings.apify_api_tokens:
         LOGGER.error(
             "Please set %s in %s or as an environment variable.",
             TOKEN_ENV_VAR,

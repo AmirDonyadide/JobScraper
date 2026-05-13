@@ -18,7 +18,7 @@ from jobfinder.scraper.run_history import (
     load_google_spreadsheet_context,
     remove_jobs_seen_in_history,
 )
-from jobfinder.scraper.settings import ScraperSettings
+from jobfinder.scraper.settings import ApifyTokenPool, ScraperSettings
 
 
 def make_settings(run_started_at: datetime) -> ScraperSettings:
@@ -29,6 +29,8 @@ def make_settings(run_started_at: datetime) -> ScraperSettings:
         filter_config={},
         keywords=["GIS"],
         apify_api_token="token",
+        apify_api_tokens=("token",),
+        apify_token_pool=ApifyTokenPool(("token",)),
         google_spreadsheet_id="spreadsheet-id",
         scraper_timezone="Europe/Berlin",
         posted_timezone="Europe/Berlin",

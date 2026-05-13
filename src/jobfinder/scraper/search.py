@@ -14,6 +14,7 @@ import requests
 from jobfinder.providers import indeed, stepstone
 from jobfinder.scraper.providers import linkedin
 from jobfinder.scraper.providers.apify_client import (
+    ApifyAccountUnavailableError,
     ApifyConfigurationError,
     ApifyRunError,
     ApifyRunTimeoutError,
@@ -34,6 +35,7 @@ LOGGER = logging.getLogger("jobfinder.scraper")
 
 __all__ = [
     "ApifyConfigurationError",
+    "ApifyAccountUnavailableError",
     "ApifyRunError",
     "ApifyRunTimeoutError",
     "ApifyTransientError",

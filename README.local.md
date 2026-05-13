@@ -107,12 +107,24 @@ APIFY_API_TOKEN=apify_api_...
 OPENAI_API_KEY=sk-...
 ```
 
+`APIFY_API_TOKEN` can also contain fallback tokens in one setting, separated by
+semicolons. Use between 1 and 12 tokens:
+
+```bash
+APIFY_API_TOKEN=apify_api_1;apify_api_2;apify_api_3;apify_api_4;apify_api_5;apify_api_6
+```
+
+The scraper tries tokens in order. If Apify says a token cannot pay for a run,
+the scraper retires that token for the current process and retries the search
+with the next configured token.
+
 `OPENAI_API_KEY` is only required when the selected mode evaluates jobs.
 
 Common settings:
 
 | Setting | Default | Description |
 |---|---:|---|
+| `APIFY_API_TOKEN` | blank | One Apify token, or 1 to 12 tokens separated by `;` for ordered credit fallback. |
 | `JOBSCRAPER_SOURCES` | `linkedin` | Use `linkedin`, `indeed`, `stepstone`, `both`, `all`, or comma-separated source names such as `linkedin,stepstone`. |
 | `JOBSCRAPER_OUTPUT_MODE` | `excel` | Use `excel`, `google_sheets`, or `both`. The full pipeline forces Google Sheets. |
 | `JOBFINDER_PIPELINE_MODE` | `scrape_and_evaluate` | For `run_job_pipeline.py`, use `scrape_only` or `scrape_and_evaluate`. |

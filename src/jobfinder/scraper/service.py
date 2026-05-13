@@ -151,6 +151,11 @@ def run_scrape(settings: ScraperSettings) -> ScrapeResult:
         )
     LOGGER.info("Searches: %s.", len(searches))
     LOGGER.info("Search concurrency: %s.", settings.search_concurrency)
+    if len(settings.apify_api_tokens) > 1:
+        LOGGER.info(
+            "Apify token fallbacks configured: %s.",
+            len(settings.apify_api_tokens),
+        )
     if settings.max_applicants > 0:
         LOGGER.info("Max applicants/job: %s.", settings.max_applicants)
     else:

@@ -133,7 +133,28 @@ jobs:
           missing=0
 
           if [ -z "${APIFY_API_TOKEN}" ]; then
-            echo "::error::Missing repository secret APIFY_API_TOKEN."
+            echo "::error::Missing repository secret APIFY_API_TOKEN. Save one Apify token, or up to 12 tokens separated by semicolons."
+            missing=1
+          fi
+
+          apify_token_count="$(
+            python - <<'PY'
+          import os
+
+          tokens = []
+          seen = set()
+          for part in os.environ.get("APIFY_API_TOKEN", "").split(";"):
+              token = part.strip()
+              if token and token != "apify_api_XXXXXXXXXXXX" and token not in seen:
+                  tokens.append(token)
+                  seen.add(token)
+
+          print(len(tokens))
+          PY
+          )"
+
+          if [ "$apify_token_count" -gt 12 ]; then
+            echo "::error::APIFY_API_TOKEN supports at most 12 semicolon-separated tokens."
             missing=1
           fi
 

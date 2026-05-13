@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from jobfinder.scraper.providers.apify_client import (
+    ApifyAccountUnavailableError,
     ApifyConfigurationError,
     ApifyRunError,
     ApifyRunTimeoutError,
@@ -22,6 +23,7 @@ from jobfinder.scraper.providers.apify_client import (
 
 __all__ = [
     "ApifyConfigurationError",
+    "ApifyAccountUnavailableError",
     "ApifyRunError",
     "ApifyRunTimeoutError",
     "ApifyTransientError",

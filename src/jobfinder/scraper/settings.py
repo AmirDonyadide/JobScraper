@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import threading
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -28,6 +29,8 @@ from jobfinder.paths import (
 
 TOKEN_ENV_VAR = "APIFY_API_TOKEN"
 TOKEN_PLACEHOLDER = "apify_api_XXXXXXXXXXXX"
+TOKEN_SEPARATOR = ";"
+MAX_APIFY_API_TOKENS = 12
 SPREADSHEET_TITLE = "jobs"
 DEFAULT_APIFY_RUN_TIMEOUT_SECONDS = 3600
 DEFAULT_APIFY_CLIENT_TIMEOUT_SECONDS = 120
@@ -105,6 +108,90 @@ DEFAULT_EXCLUDED_COMPANY_TERMS = [
 
 
 @dataclass(frozen=True)
+class ApifyTokenSelection:
+    """One token chosen from the configured Apify token list."""
+
+    index: int
+    token: str
+    total: int
+
+    @property
+    def label(self) -> str:
+        """Return a log-safe token label without exposing the secret."""
+        if self.total <= 1:
+            return TOKEN_ENV_VAR
+        return f"{TOKEN_ENV_VAR} #{self.index + 1}"
+
+
+class ApifyTokenPool:
+    """Thread-safe ordered pool of Apify tokens for billing failover."""
+
+    def __init__(self, tokens: tuple[str, ...]) -> None:
+        self._tokens = tokens
+        self._current_index = 0
+        self._unavailable_indices: set[int] = set()
+        self._lock = threading.Lock()
+
+    @property
+    def tokens(self) -> tuple[str, ...]:
+        """Return configured tokens in fallback order."""
+        return self._tokens
+
+    @property
+    def total_count(self) -> int:
+        """Return the number of configured tokens."""
+        return len(self._tokens)
+
+    @property
+    def available_count(self) -> int:
+        """Return the number of tokens not yet marked unavailable."""
+        with self._lock:
+            return max(0, len(self._tokens) - len(self._unavailable_indices))
+
+    def active(self) -> ApifyTokenSelection | None:
+        """Return the active token, skipping tokens already marked unavailable."""
+        with self._lock:
+            index = self._next_available_index_locked(self._current_index)
+            if index is None:
+                return None
+            self._current_index = index
+            return ApifyTokenSelection(index, self._tokens[index], len(self._tokens))
+
+    def retire(self, selection: ApifyTokenSelection) -> ApifyTokenSelection | None:
+        """Mark a token unavailable and return the next usable token if any."""
+        with self._lock:
+            if (
+                0 <= selection.index < len(self._tokens)
+                and self._tokens[selection.index] == selection.token
+            ):
+                self._unavailable_indices.add(selection.index)
+                start_index = (selection.index + 1) % len(self._tokens)
+            else:
+                start_index = self._current_index
+
+            next_index = self._next_available_index_locked(start_index)
+            if next_index is None:
+                return None
+            self._current_index = next_index
+            return ApifyTokenSelection(
+                next_index,
+                self._tokens[next_index],
+                len(self._tokens),
+            )
+
+    def _next_available_index_locked(self, start_index: int) -> int | None:
+        """Return the next non-retired token index while the lock is held."""
+        if not self._tokens or len(self._unavailable_indices) >= len(self._tokens):
+            return None
+
+        for offset in range(len(self._tokens)):
+            index = (start_index + offset) % len(self._tokens)
+            if index not in self._unavailable_indices:
+                return index
+        return None
+
+
+@dataclass(frozen=True)
 class ScraperSettings:
     """Resolved scraper settings from env variables and config files."""
 
@@ -112,6 +199,8 @@ class ScraperSettings:
     filter_config: dict[str, Any]
     keywords: list[str]
     apify_api_token: str
+    apify_api_tokens: tuple[str, ...]
+    apify_token_pool: ApifyTokenPool
     google_spreadsheet_id: str
     scraper_timezone: str
     posted_timezone: str
@@ -235,12 +324,16 @@ def load_scraper_settings(env: EnvSettings | None = None) -> ScraperSettings:
             search_concurrency,
             max(1, apify_memory_limit_mb // apify_run_memory_mb),
         )
+    raw_apify_token = env.get(TOKEN_ENV_VAR)
+    apify_api_tokens = parse_apify_api_tokens(raw_apify_token)
 
     return ScraperSettings(
         env=env,
         filter_config=filter_config,
         keywords=keywords,
-        apify_api_token=env.get(TOKEN_ENV_VAR),
+        apify_api_token=apify_api_tokens[0] if apify_api_tokens else raw_apify_token,
+        apify_api_tokens=apify_api_tokens,
+        apify_token_pool=ApifyTokenPool(apify_api_tokens),
         google_spreadsheet_id=env.get("GOOGLE_SPREADSHEET_ID"),
         scraper_timezone=scraper_timezone,
         posted_timezone=posted_timezone,
@@ -387,6 +480,27 @@ def parse_env_list(value: str | None) -> list[str]:
         return []
     items = re.split(r"[\n,]+", value)
     return [item.strip() for item in items if item.strip()]
+
+
+def parse_apify_api_tokens(value: str | None) -> tuple[str, ...]:
+    """Parse semicolon-separated Apify API tokens from one env setting."""
+    if not value:
+        return ()
+
+    tokens: list[str] = []
+    seen: set[str] = set()
+    for item in value.split(TOKEN_SEPARATOR):
+        token = item.strip()
+        if not token or token == TOKEN_PLACEHOLDER or token in seen:
+            continue
+        if len(tokens) >= MAX_APIFY_API_TOKENS:
+            raise RuntimeError(
+                f"{TOKEN_ENV_VAR} supports at most {MAX_APIFY_API_TOKENS} "
+                f"semicolon-separated token(s)."
+            )
+        tokens.append(token)
+        seen.add(token)
+    return tuple(tokens)
 
 
 def load_timezone(value: str, setting_name: str) -> ZoneInfo:

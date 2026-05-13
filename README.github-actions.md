@@ -161,7 +161,7 @@ Add these secrets exactly:
 
 | Secret name | Required for | What to paste |
 |---|---|---|
-| `APIFY_API_TOKEN` | All runs | Your Apify API token, for example `apify_api_...`. |
+| `APIFY_API_TOKEN` | All runs | One Apify API token, or 1 to 12 tokens separated by `;`, for example `apify_api_1;apify_api_2;apify_api_3`. |
 | `OPENAI_API_KEY` | `scrape_and_evaluate` | Your OpenAI API key, for example `sk-...` or `sk-proj-...`. |
 | `GOOGLE_SPREADSHEET_ID` | All runs | The spreadsheet ID from the Google Sheet URL. |
 | `GOOGLE_SERVICE_ACCOUNT_JSON` | All runs | The full contents of the service-account JSON key. |
@@ -268,6 +268,10 @@ This keeps 15 Apify keyword searches running in parallel, with 512 MB assigned
 to each actor run. Each keyword search gets up to 60 minutes of actor runtime.
 Temporary Apify API issues such as 502/503/504 responses, rate limits, HTTP
 timeouts, and short memory-limit pressure are retried before the workflow fails.
+If `APIFY_API_TOKEN` contains multiple semicolon-separated tokens, the scraper
+uses them in order. When Apify returns a billing/auth/access error for one token,
+that token is skipped for the rest of the workflow run and the same search is
+retried with the next configured token.
 
 The evaluator allows up to 8 OpenAI requests at the same time, with jobs grouped
 locally in batches of 40. When more than 200 rows are queued, the evaluator

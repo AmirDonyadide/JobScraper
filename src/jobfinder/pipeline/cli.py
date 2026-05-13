@@ -12,7 +12,7 @@ from jobfinder.env import EnvSettings, load_local_env
 from jobfinder.operations.reports import write_report_from_env
 from jobfinder.paths import ENV_FILE, PROJECT_ROOT
 from jobfinder.pipeline.preflight import run_preflight
-from jobfinder.scraper.settings import TOKEN_PLACEHOLDER
+from jobfinder.scraper.settings import parse_apify_api_tokens
 
 LOGGER = logging.getLogger("jobfinder.pipeline")
 
@@ -62,7 +62,11 @@ def validate_required_settings(local_env: dict[str, str], pipeline_mode: str) ->
     apify_token = setting(local_env, "APIFY_API_TOKEN")
 
     missing = []
-    if not apify_token or apify_token == TOKEN_PLACEHOLDER:
+    try:
+        apify_tokens = parse_apify_api_tokens(apify_token)
+    except RuntimeError as exc:
+        raise SystemExit(str(exc)) from exc
+    if not apify_tokens:
         missing.append("APIFY_API_TOKEN")
 
     if pipeline_mode == PIPELINE_MODE_SCRAPE_AND_EVALUATE:

@@ -48,6 +48,30 @@ def test_scrape_only_requires_apify_but_not_openai(monkeypatch):
     )
 
 
+def test_scrape_only_accepts_multiple_apify_tokens(monkeypatch):
+    """The pipeline gate should accept semicolon-separated Apify token fallbacks."""
+    monkeypatch.delenv("APIFY_API_TOKEN", raising=False)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+
+    validate_required_settings(
+        {"APIFY_API_TOKEN": "apify_api_first;apify_api_second"},
+        PIPELINE_MODE_SCRAPE_ONLY,
+    )
+
+
+def test_pipeline_rejects_too_many_apify_tokens(monkeypatch):
+    """The GitHub secret should be capped to a bounded token list."""
+    monkeypatch.delenv("APIFY_API_TOKEN", raising=False)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    tokens = [f"apify_api_{idx}" for idx in range(13)]
+
+    with pytest.raises(SystemExit, match="at most 12"):
+        validate_required_settings(
+            {"APIFY_API_TOKEN": ";".join(tokens)},
+            PIPELINE_MODE_SCRAPE_ONLY,
+        )
+
+
 def test_scrape_and_evaluate_requires_openai_key(monkeypatch):
     """The full pipeline still needs the OpenAI key before it starts."""
     monkeypatch.delenv("APIFY_API_TOKEN", raising=False)
