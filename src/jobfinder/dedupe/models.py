@@ -91,16 +91,17 @@ class NormalizedJob:
     normalized_title: str
     normalized_company: str
     normalized_location: str
+    normalized_job_type: str
     title_tokens: frozenset[str]
     company_tokens: frozenset[str]
     location_tokens: frozenset[str]
+    job_type_tokens: frozenset[str]
     job_url: str
     job_url_key: str
     apply_url: str
     apply_url_key: str
     company_url: str
     company_url_key: str
-    strong_keys: frozenset[str]
     blocking_keys: frozenset[str]
     provenance: Provenance
 
@@ -116,7 +117,7 @@ class NormalizedJob:
         return (
             "profile|any|"
             f"{self.normalized_company}|{self.normalized_title}|"
-            f"{self.normalized_location}"
+            f"{self.normalized_location}|{self.normalized_job_type}"
         )
 
 

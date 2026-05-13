@@ -176,8 +176,8 @@ def test_filter_jobs_to_previous_run_window_keeps_exact_interval():
     assert unknown_count == 1
 
 
-def test_remove_jobs_seen_in_history_matches_previous_hyperlink_formula():
-    """New raw jobs should be matched against URLs stored in older run tabs."""
+def test_remove_jobs_seen_in_history_matches_allowed_identity_cells():
+    """New raw jobs should match previous rows by title, company, and location."""
     berlin = ZoneInfo("Europe/Berlin")
     settings = make_settings(datetime(2026, 5, 6, 10, 0, tzinfo=berlin))
     historical_keys = job_identity_keys_from_values(
@@ -185,8 +185,6 @@ def test_remove_jobs_seen_in_history_matches_previous_hyperlink_formula():
         title="GIS Analyst",
         company="GeoCo",
         location="Berlin",
-        job_url='=HYPERLINK("https://www.linkedin.com/jobs/view/123456/?trk=x", '
-        '"Open Job")',
     )
     jobs = [
         {
@@ -217,8 +215,8 @@ def test_remove_jobs_seen_in_history_matches_previous_hyperlink_formula():
     assert duplicate_count == 1
 
 
-def test_remove_jobs_seen_in_history_uses_new_indeed_key():
-    """New Indeed actor keys should match the maintained seen-jobs index."""
+def test_remove_jobs_seen_in_history_ignores_provider_id_only_keys():
+    """Provider IDs are no longer part of historical duplicate identity."""
     berlin = ZoneInfo("Europe/Berlin")
     settings = make_settings(datetime(2026, 5, 6, 10, 0, tzinfo=berlin))
     historical_keys = {"id|indeed|abc123"}
@@ -247,24 +245,15 @@ def test_remove_jobs_seen_in_history_uses_new_indeed_key():
         historical_keys,
     )
 
-    assert [job["key"] for job in kept] == ["xyz999"]
-    assert duplicate_count == 1
+    assert [job["key"] for job in kept] == ["abc123", "xyz999"]
+    assert duplicate_count == 0
 
 
-def test_remove_jobs_seen_in_history_uses_stepstone_url_key():
-    """Stepstone jobs should dedupe against previous hyperlink formulas."""
+def test_remove_jobs_seen_in_history_ignores_provider_url_only_keys():
+    """Provider job URLs are no longer part of historical duplicate identity."""
     berlin = ZoneInfo("Europe/Berlin")
     settings = make_settings(datetime(2026, 5, 6, 10, 0, tzinfo=berlin))
-    historical_keys = job_identity_keys_from_values(
-        source="Stepstone",
-        title="IT Administrator",
-        company="LOW Teq GmbH",
-        location="Cologne",
-        job_url=(
-            '=HYPERLINK("https://www.stepstone.de/stellenangebote--IT-'
-            'Administrator--12424623-inline.html?rltr=1", "Open Job")'
-        ),
-    )
+    historical_keys = {"url|stepstone|stepstone:12424623"}
     jobs = [
         {
             "_source": "stepstone",
@@ -294,8 +283,8 @@ def test_remove_jobs_seen_in_history_uses_stepstone_url_key():
         historical_keys,
     )
 
-    assert [job["id"] for job in kept] == ["999999"]
-    assert duplicate_count == 1
+    assert [job["id"] for job in kept] == ["12424623", "999999"]
+    assert duplicate_count == 0
 
 
 def test_load_google_spreadsheet_context_prefers_seen_jobs_index(monkeypatch):

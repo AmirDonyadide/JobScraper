@@ -27,39 +27,99 @@ def test_clean_job_description_removes_html_without_flattening_lists():
 def test_merge_and_deduplicate_collects_all_matched_keywords():
     """Deduplication should keep one job and remember all matching keywords."""
     jobs = [
-        ("GIS", [{"_source": "linkedin", "jobId": "1", "title": "Analyst"}]),
-        ("Python", [{"_source": "linkedin", "jobId": "1", "title": "Analyst"}]),
-    ]
-
-    merged = merge_and_deduplicate(jobs)
-
-    assert len(merged) == 1
-    assert merged[0]["keywords_matched"] == ["GIS", "Python"]
-
-
-def test_merge_and_deduplicate_uses_indeed_actor_key():
-    """New Indeed actor keys should behave like source-native job IDs."""
-    jobs = [
-        ("GIS", [{"_source": "indeed", "key": "abc123", "title": "Analyst"}]),
-        ("Python", [{"_source": "indeed", "key": "abc123", "title": "Analyst"}]),
-    ]
-
-    merged = merge_and_deduplicate(jobs)
-
-    assert len(merged) == 1
-    assert merged[0]["keywords_matched"] == ["GIS", "Python"]
-
-
-def test_merge_and_deduplicate_uses_stepstone_actor_id():
-    """Stepstone IDs should behave like source-native job IDs."""
-    jobs = [
         (
             "GIS",
-            [{"_source": "stepstone", "stepstoneId": "12424623", "title": "Analyst"}],
+            [
+                {
+                    "_source": "linkedin",
+                    "jobId": "1",
+                    "title": "Analyst",
+                    "companyName": "GeoCo",
+                    "location": "Berlin",
+                }
+            ],
         ),
         (
             "Python",
-            [{"_source": "stepstone", "id": "12424623", "title": "Analyst"}],
+            [
+                {
+                    "_source": "linkedin",
+                    "jobId": "2",
+                    "title": "Analyst",
+                    "companyName": "GeoCo GmbH",
+                    "location": "Berlin, Germany",
+                }
+            ],
+        ),
+    ]
+
+    merged = merge_and_deduplicate(jobs)
+
+    assert len(merged) == 1
+    assert merged[0]["keywords_matched"] == ["GIS", "Python"]
+
+
+def test_merge_and_deduplicate_uses_allowed_cells_for_indeed_duplicates():
+    """Indeed duplicates should merge by allowed identity cells, not actor keys."""
+    jobs = [
+        (
+            "GIS",
+            [
+                {
+                    "_source": "indeed",
+                    "key": "abc123",
+                    "title": "Analyst",
+                    "companyName": "GeoCo",
+                    "location": "Berlin",
+                }
+            ],
+        ),
+        (
+            "Python",
+            [
+                {
+                    "_source": "indeed",
+                    "key": "xyz999",
+                    "title": "Analyst",
+                    "companyName": "GeoCo GmbH",
+                    "location": "Berlin, Germany",
+                }
+            ],
+        ),
+    ]
+
+    merged = merge_and_deduplicate(jobs)
+
+    assert len(merged) == 1
+    assert merged[0]["keywords_matched"] == ["GIS", "Python"]
+
+
+def test_merge_and_deduplicate_uses_allowed_cells_for_stepstone_duplicates():
+    """Stepstone duplicates should merge by allowed identity cells, not actor IDs."""
+    jobs = [
+        (
+            "GIS",
+            [
+                {
+                    "_source": "stepstone",
+                    "stepstoneId": "12424623",
+                    "title": "Analyst",
+                    "companyName": "GeoCo",
+                    "location": "Berlin",
+                }
+            ],
+        ),
+        (
+            "Python",
+            [
+                {
+                    "_source": "stepstone",
+                    "id": "999999",
+                    "title": "Analyst",
+                    "companyName": "GeoCo GmbH",
+                    "location": "Berlin, Germany",
+                }
+            ],
         ),
     ]
 

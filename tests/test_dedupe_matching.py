@@ -232,8 +232,8 @@ def test_conflicting_titles_do_not_merge():
     assert len(merge_and_deduplicate(jobs)) == 2
 
 
-def test_salary_conflicts_prevent_exact_profile_merge():
-    """Exact company/title/location still should not override salary contradictions."""
+def test_salary_differences_do_not_affect_duplicate_matching():
+    """Salary is preserved metadata, not part of duplicate identity."""
     jobs = [
         (
             "Analyst",
@@ -265,7 +265,126 @@ def test_salary_conflicts_prevent_exact_profile_merge():
         ),
     ]
 
+    merged = merge_and_deduplicate(jobs)
+
+    assert len(merged) == 1
+    assert merged[0]["_source_label"] == "LinkedIn | Indeed"
+
+
+def test_job_type_conflict_prevents_merge():
+    """Job type is part of duplicate identity."""
+    jobs = [
+        (
+            "Analyst",
+            [
+                {
+                    "_source": "linkedin",
+                    "_source_label": "LinkedIn",
+                    "jobId": "li-5",
+                    "title": "Data Analyst",
+                    "companyName": "Acme",
+                    "location": "Berlin",
+                    "jobType": "Full-time",
+                }
+            ],
+        ),
+        (
+            "Analyst",
+            [
+                {
+                    "_source": "indeed",
+                    "_source_label": "Indeed",
+                    "key": "in-5",
+                    "title": "Data Analyst",
+                    "companyName": "Acme GmbH",
+                    "location": "Berlin",
+                    "jobType": "Internship",
+                }
+            ],
+        ),
+    ]
+
     assert len(merge_and_deduplicate(jobs)) == 2
+
+
+def test_post_time_far_apart_prevents_merge():
+    """Post time is part of duplicate identity."""
+    jobs = [
+        (
+            "Analyst",
+            [
+                {
+                    "_source": "linkedin",
+                    "_source_label": "LinkedIn",
+                    "jobId": "li-6",
+                    "title": "Data Analyst",
+                    "companyName": "Acme",
+                    "location": "Berlin",
+                    "jobType": "Full-time",
+                    "postedAt": "2026-01-01T09:00:00+01:00",
+                }
+            ],
+        ),
+        (
+            "Analyst",
+            [
+                {
+                    "_source": "indeed",
+                    "_source_label": "Indeed",
+                    "key": "in-6",
+                    "title": "Data Analyst",
+                    "companyName": "Acme GmbH",
+                    "location": "Berlin",
+                    "jobType": "Full-time",
+                    "postedAt": "2026-05-01T09:00:00+02:00",
+                }
+            ],
+        ),
+    ]
+
+    assert len(merge_and_deduplicate(jobs)) == 2
+
+
+def test_same_company_apply_link_merges_when_allowed_cells_match():
+    """The external company apply link is the only URL signal used for matching."""
+    apply_url = "https://careers.acme.example/jobs/data-analyst?utm_source=linkedin"
+    jobs = [
+        (
+            "Analyst",
+            [
+                {
+                    "_source": "linkedin",
+                    "_source_label": "LinkedIn",
+                    "jobId": "li-7",
+                    "title": "Data Analyst",
+                    "companyName": "Acme",
+                    "location": "Berlin",
+                    "jobType": "Full-time",
+                    "applyUrl": apply_url,
+                }
+            ],
+        ),
+        (
+            "Analyst",
+            [
+                {
+                    "_source": "stepstone",
+                    "_source_label": "Stepstone",
+                    "id": "ss-7",
+                    "title": "Data Analyst (m/f/d)",
+                    "companyName": "Acme GmbH",
+                    "location": "Berlin, Germany",
+                    "jobType": "Vollzeit",
+                    "applyUrl": "https://careers.acme.example/jobs/data-analyst",
+                }
+            ],
+        ),
+    ]
+
+    merged = merge_and_deduplicate(jobs)
+
+    assert len(merged) == 1
+    assert merged[0]["_source_label"] == "LinkedIn | Stepstone"
 
 
 def test_historical_dedupe_matches_cross_provider_profile_keys():

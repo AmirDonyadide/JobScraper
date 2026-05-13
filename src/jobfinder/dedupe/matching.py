@@ -13,190 +13,160 @@ from jobfinder.dedupe.scoring import (
     company_similarity,
     conflicting_role_family,
     conflicting_seniority,
+    job_type_similarity,
     location_similarity,
-    significant_salary_conflict,
+    posted_time_similarity,
     title_similarity,
-    weighted_confidence,
 )
 
 LOGGER = logging.getLogger("jobfinder.dedupe")
-MATCH_THRESHOLD = 0.90
-PROFILE_MATCH_CONFIDENCE = 0.96
+COMPANY_MATCH_THRESHOLD = 0.90
+TITLE_MATCH_THRESHOLD = 0.82
+LOCATION_MATCH_THRESHOLD = 0.82
+JOB_TYPE_MATCH_THRESHOLD = 0.70
+POSTED_TIME_MATCH_THRESHOLD = 0.55
+MATCH_THRESHOLD = 0.88
 
 
-def hard_blockers(left: NormalizedJob, right: NormalizedJob) -> list[str]:
-    """Return deterministic reasons that prevent a heuristic merge."""
+def identity_blockers(left: NormalizedJob, right: NormalizedJob) -> list[str]:
+    """Return deterministic contradictions in the allowed identity cells."""
     blockers: list[str] = []
     if conflicting_seniority(left, right):
         blockers.append("conflicting title seniority")
     if conflicting_role_family(left, right):
         blockers.append("conflicting role family")
-    if significant_salary_conflict(left, right):
-        blockers.append("salary ranges differ significantly")
-    if company_similarity(left, right) < 0.82:
-        blockers.append("company similarity below threshold")
-    if title_similarity(left, right) < 0.72:
-        blockers.append("title similarity below threshold")
-    if location_similarity(left, right) < 0.55:
-        blockers.append("location similarity below threshold")
-    if (
-        left.source == right.source
-        and left.job_id
-        and right.job_id
-        and left.job_id.casefold() != right.job_id.casefold()
-        and not (left.apply_url_key and left.apply_url_key == right.apply_url_key)
-    ):
-        blockers.append("same provider has different source-native ids")
     return blockers
 
 
-def strong_identity_match(
+def allowed_cell_scores(left: NormalizedJob, right: NormalizedJob) -> dict[str, float]:
+    """Score only title, company, location, job type, and post time."""
+    return {
+        "company": company_similarity(left, right),
+        "title": title_similarity(left, right),
+        "location": location_similarity(left, right),
+        "job_type": job_type_similarity(left, right),
+        "posted_time": posted_time_similarity(left, right),
+    }
+
+
+def weighted_confidence(scores: dict[str, float]) -> float:
+    """Return a compact confidence from the allowed identity cells only."""
+    return (
+        (0.30 * scores["company"])
+        + (0.34 * scores["title"])
+        + (0.18 * scores["location"])
+        + (0.10 * scores["job_type"])
+        + (0.08 * scores["posted_time"])
+    )
+
+
+def similarity_blockers(scores: dict[str, float]) -> list[str]:
+    """Return threshold misses for the allowed identity cells."""
+    blockers: list[str] = []
+    if scores["company"] < COMPANY_MATCH_THRESHOLD:
+        blockers.append("company similarity below threshold")
+    if scores["title"] < TITLE_MATCH_THRESHOLD:
+        blockers.append("title similarity below threshold")
+    if scores["location"] < LOCATION_MATCH_THRESHOLD:
+        blockers.append("location similarity below threshold")
+    if scores["job_type"] < JOB_TYPE_MATCH_THRESHOLD:
+        blockers.append("job type similarity below threshold")
+    if scores["posted_time"] < POSTED_TIME_MATCH_THRESHOLD:
+        blockers.append("post time similarity below threshold")
+    return blockers
+
+
+def same_apply_link_match(
     left: NormalizedJob, right: NormalizedJob
 ) -> MatchDecision | None:
-    """Return a stage-1 decision when high-confidence identifiers match."""
-    soft_blockers = [
-        blocker
-        for blocker in hard_blockers(left, right)
-        if blocker
-        not in {
-            "company similarity below threshold",
-            "title similarity below threshold",
-            "location similarity below threshold",
-        }
-    ]
-    if (
-        left.source == right.source
-        and left.job_id
-        and left.job_id.casefold() == right.job_id.casefold()
-    ):
-        return MatchDecision(
-            left.index,
-            right.index,
-            True,
-            1.0,
-            "strong_identity",
-            (f"same {left.source} job id",),
-        )
-
-    if (
-        left.source == right.source
-        and left.job_url_key
-        and left.job_url_key == right.job_url_key
-    ):
-        return MatchDecision(
-            left.index,
-            right.index,
-            True,
-            1.0,
-            "strong_identity",
-            (f"same {left.source} canonical job URL",),
-        )
-
-    if left.apply_url_key and left.apply_url_key == right.apply_url_key:
-        return MatchDecision(
-            left.index,
-            right.index,
-            True,
-            0.99,
-            "strong_identity",
-            ("same canonical external apply URL",),
-        )
-
-    if soft_blockers:
-        return MatchDecision(
-            left.index,
-            right.index,
-            False,
-            0.0,
-            "blocked",
-            (),
-            tuple(soft_blockers),
-        )
-
-    if (
-        left.company_url_key
-        and left.company_url_key == right.company_url_key
-        and left.normalized_title
-        and left.normalized_title == right.normalized_title
-        and location_similarity(left, right) >= 0.82
-    ):
-        return MatchDecision(
-            left.index,
-            right.index,
-            True,
-            0.98,
-            "strong_identity",
-            ("same company URL, title, and compatible location",),
-        )
-
-    return None
-
-
-def canonical_profile_match(
-    left: NormalizedJob, right: NormalizedJob
-) -> MatchDecision | None:
-    """Return a stage-2 exact canonical-profile decision when safe."""
-    if not left.profile_key or left.profile_key != right.profile_key:
+    """Use the external company apply link as the only URL-based strong signal."""
+    if not left.apply_url_key or left.apply_url_key != right.apply_url_key:
         return None
 
-    blockers = hard_blockers(left, right)
+    scores = allowed_cell_scores(left, right)
+    blockers = [*identity_blockers(left, right), *similarity_blockers(scores)]
     if blockers:
         return MatchDecision(
             left.index,
             right.index,
             False,
-            0.0,
+            weighted_confidence(scores),
             "blocked",
-            (),
+            tuple(f"{name}={score:.2f}" for name, score in scores.items()),
             tuple(blockers),
         )
+
     return MatchDecision(
         left.index,
         right.index,
         True,
-        PROFILE_MATCH_CONFIDENCE,
-        "canonical_profile",
-        ("same normalized company, title, and location",),
+        0.99,
+        "company_apply_link",
+        ("same canonical external company apply link",),
     )
 
 
-def heuristic_match(left: NormalizedJob, right: NormalizedJob) -> MatchDecision:
-    """Score a possible duplicate using deterministic weighted components."""
-    blockers = hard_blockers(left, right)
-    confidence, components = weighted_confidence(left, right)
-    reasons = tuple(
-        f"{name}={score:.2f}" for name, score in components.items() if score > 0
-    )
+def exact_allowed_cells_match(
+    left: NormalizedJob, right: NormalizedJob
+) -> MatchDecision | None:
+    """Match exact normalized company, title, location, and compatible metadata."""
+    if not left.profile_key or left.profile_key != right.profile_key:
+        return None
+
+    scores = allowed_cell_scores(left, right)
+    blockers = [*identity_blockers(left, right), *similarity_blockers(scores)]
     if blockers:
         return MatchDecision(
             left.index,
             right.index,
             False,
-            confidence,
-            "heuristic",
-            reasons,
+            weighted_confidence(scores),
+            "blocked",
+            tuple(f"{name}={score:.2f}" for name, score in scores.items()),
             tuple(blockers),
         )
+
     return MatchDecision(
         left.index,
         right.index,
-        confidence >= MATCH_THRESHOLD,
+        True,
+        0.96,
+        "exact_allowed_cells",
+        ("same normalized company, title, location, job type, and post time",),
+    )
+
+
+def scored_allowed_cells_match(
+    left: NormalizedJob, right: NormalizedJob
+) -> MatchDecision:
+    """Score possible duplicates using only the allowed identity cells."""
+    scores = allowed_cell_scores(left, right)
+    confidence = weighted_confidence(scores)
+    reasons = tuple(f"{name}={score:.2f}" for name, score in scores.items())
+    blockers = [*identity_blockers(left, right), *similarity_blockers(scores)]
+    if confidence < MATCH_THRESHOLD:
+        blockers.append("overall allowed-cell confidence below threshold")
+
+    return MatchDecision(
+        left.index,
+        right.index,
+        not blockers,
         confidence,
-        "heuristic",
+        "allowed_cell_score",
         reasons,
-        (),
+        tuple(blockers),
     )
 
 
 def evaluate_match(left: NormalizedJob, right: NormalizedJob) -> MatchDecision:
-    """Run all deterministic matching stages for a pair."""
-    strong = strong_identity_match(left, right)
-    if strong is not None:
-        return strong
-    profile = canonical_profile_match(left, right)
-    if profile is not None:
-        return profile
-    return heuristic_match(left, right)
+    """Run the compact deterministic matching stages for a pair."""
+    apply_match = same_apply_link_match(left, right)
+    if apply_match is not None:
+        return apply_match
+    exact_match = exact_allowed_cells_match(left, right)
+    if exact_match is not None:
+        return exact_match
+    return scored_allowed_cells_match(left, right)
 
 
 def best_cluster_match(

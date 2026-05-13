@@ -110,6 +110,20 @@ LOCATION_ALIASES = {
     "nuernberg": "nurnberg",
     "nürnberg": "nurnberg",
 }
+JOB_TYPE_PHRASES = {
+    "full time": "fulltime",
+    "full-time": "fulltime",
+    "vollzeit": "fulltime",
+    "part time": "parttime",
+    "part-time": "parttime",
+    "teilzeit": "parttime",
+    "internship": "internship",
+    "praktikum": "internship",
+    "contract": "contract",
+    "contractor": "contract",
+    "freelance": "freelance",
+    "permanent": "permanent",
+}
 REMOTE_WORDS = {"remote", "home office", "home-office", "homeoffice", "work from home"}
 HYBRID_WORDS = {"hybrid", "teilweise remote"}
 ONSITE_WORDS = {"onsite", "on-site", "vor ort", "praesenz", "präsenz"}
@@ -330,6 +344,28 @@ def normalize_location(value: Any) -> str:
     if remote_mode_from_text(value):
         return "remote"
     return ""
+
+
+def normalize_job_type(value: Any) -> str:
+    """Normalize employment type labels into stable comparable tokens."""
+    if not is_meaningful(value):
+        return ""
+    text = ascii_fold(str(value or ""))
+    normalized_tokens: list[str] = []
+    for phrase, token in JOB_TYPE_PHRASES.items():
+        if phrase in text:
+            normalized_tokens.append(token)
+
+    raw_tokens = token_list(text)
+    for token in raw_tokens:
+        if token in {"full", "time"} and "fulltime" in normalized_tokens:
+            continue
+        if token in {"part", "time"} and "parttime" in normalized_tokens:
+            continue
+        if token not in {"m", "f", "d", "w", "x", "all", "gender", "genders"}:
+            normalized_tokens.append(JOB_TYPE_PHRASES.get(token, token))
+
+    return " ".join(unique_ordered(normalized_tokens))
 
 
 def extract_hyperlink_url(value: Any) -> str:
@@ -586,66 +622,25 @@ def title_signature(tokens: frozenset[str]) -> str:
     return " ".join(useful[:4])
 
 
-def build_strong_keys(
-    *,
-    source: str,
-    job_id: str,
-    job_url_key: str,
-    apply_url_key: str,
-    company_url_key: str,
-    normalized_company: str,
-    normalized_title: str,
-    normalized_location: str,
-) -> frozenset[str]:
-    """Build high-confidence identity keys for indexing and history."""
-    keys: set[str] = set()
-    if job_id:
-        keys.add(f"id|{source}|{job_id.casefold()}")
-    if job_url_key:
-        keys.add(f"url|{source}|{job_url_key}")
-    if apply_url_key:
-        keys.add(f"apply|{apply_url_key}")
-    if company_url_key and normalized_title and normalized_location:
-        keys.add(
-            f"company_url_profile|{company_url_key}|{normalized_title}|{normalized_location}"
-        )
-    if normalized_company and normalized_title and normalized_location:
-        keys.add(
-            f"profile|any|{normalized_company}|{normalized_title}|{normalized_location}"
-        )
-        keys.add(
-            "profile|"
-            f"{source}|{normalized_title}|{normalized_company}|{normalized_location}"
-        )
-    return frozenset(keys)
-
-
 def build_blocking_keys(
     *,
-    source: str,
-    job_id: str,
-    job_url_key: str,
     apply_url_key: str,
-    company_url_key: str,
     normalized_company: str,
     normalized_title: str,
     normalized_location: str,
+    normalized_job_type: str,
     title_tokens: frozenset[str],
     company_tokens: frozenset[str],
 ) -> frozenset[str]:
     """Build candidate lookup keys that avoid full pairwise comparisons."""
     keys: set[str] = set()
-    if job_id:
-        keys.add(f"id|{source}|{job_id.casefold()}")
-    if job_url_key:
-        keys.add(f"url|{source}|{job_url_key}")
     if apply_url_key:
         keys.add(f"apply|{apply_url_key}")
-    if company_url_key:
-        keys.add(f"company_url|{company_url_key}")
     if normalized_company and normalized_title and normalized_location:
         keys.add(
-            f"profile|{normalized_company}|{normalized_title}|{normalized_location}"
+            "profile|"
+            f"{normalized_company}|{normalized_title}|"
+            f"{normalized_location}|{normalized_job_type}"
         )
     if normalized_company and title_tokens:
         keys.add(f"company_title|{normalized_company}|{title_signature(title_tokens)}")
@@ -690,9 +685,21 @@ def normalize_job(
     normalized_title = normalize_title(title)
     normalized_company = normalize_company(company)
     normalized_location = normalize_location(location)
+    job_type = first_text(
+        job,
+        "employmentType",
+        "employment_type",
+        "jobType",
+        "job_type",
+        "contractType",
+        "contract_type",
+        "type",
+    )
+    normalized_job_type = normalize_job_type(job_type)
     title_tokens = frozenset(token_list(normalized_title))
     company_tokens = frozenset(token_list(normalized_company))
     location_tokens = frozenset(token_list(normalized_location))
+    job_type_tokens = frozenset(token_list(normalized_job_type))
     keywords = unique_ordered(
         [
             *(str(value) for value in job.get("keywords_matched", []) or []),
@@ -703,25 +710,12 @@ def normalize_job(
     remote_mode = remote_mode_from_text(
         " ".join([title, location, description_from_job(job)])
     )
-    strong_keys = build_strong_keys(
-        source=source,
-        job_id=job_id,
-        job_url_key=job_url_key,
-        apply_url_key=apply_url_key,
-        company_url_key=company_url_key,
-        normalized_company=normalized_company,
-        normalized_title=normalized_title,
-        normalized_location=normalized_location,
-    )
     blocking_keys = build_blocking_keys(
-        source=source,
-        job_id=job_id,
-        job_url_key=job_url_key,
         apply_url_key=apply_url_key,
-        company_url_key=company_url_key,
         normalized_company=normalized_company,
         normalized_title=normalized_title,
         normalized_location=normalized_location,
+        normalized_job_type=normalized_job_type,
         title_tokens=title_tokens,
         company_tokens=company_tokens,
     )
@@ -751,16 +745,7 @@ def normalize_job(
         title=title,
         company=company,
         location=location,
-        job_type=first_text(
-            job,
-            "employmentType",
-            "employment_type",
-            "jobType",
-            "job_type",
-            "contractType",
-            "contract_type",
-            "type",
-        ),
+        job_type=job_type,
         description=description_from_job(job),
         posted_at=posted_at_from_job(job),
         salary=salary,
@@ -768,16 +753,17 @@ def normalize_job(
         normalized_title=normalized_title,
         normalized_company=normalized_company,
         normalized_location=normalized_location,
+        normalized_job_type=normalized_job_type,
         title_tokens=title_tokens,
         company_tokens=company_tokens,
         location_tokens=location_tokens,
+        job_type_tokens=job_type_tokens,
         job_url=job_url,
         job_url_key=job_url_key,
         apply_url=apply_url,
         apply_url_key=apply_url_key,
         company_url=company_url,
         company_url_key=company_url_key,
-        strong_keys=strong_keys,
         blocking_keys=blocking_keys,
         provenance=provenance,
     )

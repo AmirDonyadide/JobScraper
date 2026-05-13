@@ -13,9 +13,11 @@ from zoneinfo import ZoneInfo
 import jobfinder.dedupe.normalize as dedupe_normalize
 from jobfinder.google_sheets import quote_sheet_name
 from jobfinder.scraper.normalize import (
+    get_apply_url,
     get_company,
-    get_job_url,
+    get_job_type,
     get_location,
+    get_posted,
     get_posted_datetime,
     get_source_label,
     get_title,
@@ -45,7 +47,8 @@ HISTORICAL_IDENTITY_HEADERS = (
     "Job Title",
     "Company",
     "Location",
-    "Job URL",
+    "Job Type",
+    "Posted",
     "Apply URL",
 )
 SEEN_JOBS_SHEET_NAME = "_jobfinder_seen_jobs"
@@ -244,14 +247,39 @@ def split_source_values(source: Any) -> list[str]:
     return values or ["unknown"]
 
 
-def source_agnostic_profile_key(title: Any, company: Any, location: Any) -> str:
+def normalize_posted_identity(value: Any) -> str:
+    """Normalize posted values to a day-level identity token."""
+    text = normalize_identity_value(value)
+    if not text:
+        return ""
+    match = re.search(r"\d{4}-\d{2}-\d{2}", text)
+    if match:
+        return match.group(0)
+    posted_at = dedupe_normalize.parse_datetime_value(value)
+    if posted_at:
+        return posted_at.date().isoformat()
+    return text
+
+
+def source_agnostic_profile_key(
+    title: Any,
+    company: Any,
+    location: Any,
+    job_type: Any = "",
+    posted: Any = "",
+) -> str:
     """Build a cross-provider exact profile key from canonical field forms."""
     title_key = dedupe_normalize.normalize_title(title)
     company_key = dedupe_normalize.normalize_company(company)
     location_key = dedupe_normalize.normalize_location(location)
+    job_type_key = dedupe_normalize.normalize_job_type(job_type)
+    posted_key = normalize_posted_identity(posted)
     if not title_key or not company_key or not location_key:
         return ""
-    return f"profile|any|{company_key}|{title_key}|{location_key}"
+    return (
+        "profile|any|"
+        f"{company_key}|{title_key}|{location_key}|{job_type_key}|{posted_key}"
+    )
 
 
 def expand_historical_job_key(key: str) -> set[str]:
@@ -273,28 +301,15 @@ def job_identity_keys_from_values(
     title: Any,
     company: Any,
     location: Any,
-    job_url: Any,
+    job_url: Any = "",
     job_id: Any = "",
     apply_url: Any = "",
+    job_type: Any = "",
+    posted: Any = "",
 ) -> set[str]:
     """Build all useful duplicate keys from normalized row/job values."""
     source_keys = split_source_values(source)
     keys: set[str] = set()
-
-    normalized_job_id = normalize_identity_value(job_id)
-    if normalized_job_id:
-        for source_key in source_keys:
-            keys.add(f"id|{source_key}|{normalized_job_id}")
-
-    url_key = canonical_job_url(job_url)
-    if url_key:
-        for source_key in source_keys:
-            keys.add(f"url|{source_key}|{url_key}")
-
-    url_job_id = job_id_from_url(job_url)
-    if url_job_id:
-        for source_key in source_keys:
-            keys.add(f"id|{source_key}|{url_job_id}")
 
     external_apply_key = dedupe_normalize.canonical_external_apply_url(apply_url)
     if external_apply_key:
@@ -304,9 +319,21 @@ def job_identity_keys_from_values(
     company_key = normalize_identity_value(company)
     location_key = normalize_identity_value(location)
     if title_key and company_key and location_key:
+        job_type_key = dedupe_normalize.normalize_job_type(job_type)
+        posted_key = normalize_posted_identity(posted)
         for source_key in source_keys:
-            keys.add(f"profile|{source_key}|{title_key}|{company_key}|{location_key}")
-        profile_key = source_agnostic_profile_key(title, company, location)
+            keys.add(
+                "profile|"
+                f"{source_key}|{title_key}|{company_key}|{location_key}|"
+                f"{job_type_key}|{posted_key}"
+            )
+        profile_key = source_agnostic_profile_key(
+            title,
+            company,
+            location,
+            job_type,
+            posted,
+        )
         if profile_key:
             keys.add(profile_key)
 
@@ -315,41 +342,25 @@ def job_identity_keys_from_values(
 
 def job_identity_keys(settings: ScraperSettings, job: dict[str, Any]) -> set[str]:
     """Build duplicate keys for one raw scraped job."""
-    job_id = (
-        job.get("jobId")
-        or job.get("job_id")
-        or job.get("indeedKey")
-        or job.get("stepstoneId")
-        or job.get("harmonisedId")
-        or job.get("key")
-        or job.get("jobKey")
-        or job.get("id")
-        or ""
-    )
     keys = job_identity_keys_from_values(
         source=get_source_label(job),
         title=get_title(job),
         company=get_company(job),
         location=get_location(job),
-        job_url=get_job_url(settings, job),
-        job_id=job_id,
+        job_type=get_job_type(job),
+        posted=get_posted(settings, job),
+        apply_url=get_apply_url(job),
     )
     provenance = job.get("_jobfinder_provenance", [])
     if isinstance(provenance, list):
         for item in provenance:
             if not isinstance(item, dict):
                 continue
-            keys.update(
-                job_identity_keys_from_values(
-                    source=item.get("label") or item.get("source") or "",
-                    title=item.get("title") or get_title(job),
-                    company=item.get("company") or get_company(job),
-                    location=item.get("location") or get_location(job),
-                    job_url=item.get("job_url") or "",
-                    job_id=item.get("job_id") or "",
-                    apply_url=item.get("apply_url") or "",
-                )
+            apply_key = dedupe_normalize.canonical_external_apply_url(
+                item.get("apply_url") or ""
             )
+            if apply_key:
+                keys.add(f"apply|{apply_key}")
     return keys
 
 
