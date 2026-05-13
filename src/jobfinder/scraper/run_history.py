@@ -10,6 +10,7 @@ from typing import Any
 from urllib.parse import parse_qs, urlparse
 from zoneinfo import ZoneInfo
 
+import jobfinder.dedupe.normalize as dedupe_normalize
 from jobfinder.google_sheets import quote_sheet_name
 from jobfinder.scraper.normalize import (
     get_company,
@@ -39,7 +40,14 @@ HYPERLINK_RE = re.compile(
     r'^=HYPERLINK\("(?P<url>(?:[^"]|"")*)"\s*[,;]\s*"',
     re.IGNORECASE,
 )
-HISTORICAL_IDENTITY_HEADERS = ("App", "Job Title", "Company", "Location", "Job URL")
+HISTORICAL_IDENTITY_HEADERS = (
+    "App",
+    "Job Title",
+    "Company",
+    "Location",
+    "Job URL",
+    "Apply URL",
+)
 SEEN_JOBS_SHEET_NAME = "_jobfinder_seen_jobs"
 SEEN_JOBS_HEADER = ["Job Key"]
 
@@ -223,6 +231,42 @@ def job_id_from_url(value: Any) -> str:
     return ""
 
 
+def split_source_values(source: Any) -> list[str]:
+    """Split the App column into individual provider labels."""
+    text = normalize_identity_value(source)
+    if not text:
+        return ["unknown"]
+    values = [
+        normalize_identity_value(part)
+        for part in re.split(r"\s*\|\s*", text)
+        if normalize_identity_value(part)
+    ]
+    return values or ["unknown"]
+
+
+def source_agnostic_profile_key(title: Any, company: Any, location: Any) -> str:
+    """Build a cross-provider exact profile key from canonical field forms."""
+    title_key = dedupe_normalize.normalize_title(title)
+    company_key = dedupe_normalize.normalize_company(company)
+    location_key = dedupe_normalize.normalize_location(location)
+    if not title_key or not company_key or not location_key:
+        return ""
+    return f"profile|any|{company_key}|{title_key}|{location_key}"
+
+
+def expand_historical_job_key(key: str) -> set[str]:
+    """Add source-agnostic equivalents for legacy seen-job index keys."""
+    text = str(key or "").strip()
+    expanded = {text} if text else set()
+    parts = text.split("|")
+    if len(parts) == 5 and parts[0] == "profile" and parts[1] != "any":
+        _, _source, title, company, location = parts
+        profile_key = source_agnostic_profile_key(title, company, location)
+        if profile_key:
+            expanded.add(profile_key)
+    return expanded
+
+
 def job_identity_keys_from_values(
     *,
     source: Any,
@@ -231,28 +275,42 @@ def job_identity_keys_from_values(
     location: Any,
     job_url: Any,
     job_id: Any = "",
+    apply_url: Any = "",
 ) -> set[str]:
     """Build all useful duplicate keys from normalized row/job values."""
-    source_key = normalize_identity_value(source) or "unknown"
+    source_keys = split_source_values(source)
     keys: set[str] = set()
 
     normalized_job_id = normalize_identity_value(job_id)
     if normalized_job_id:
-        keys.add(f"id|{source_key}|{normalized_job_id}")
+        for source_key in source_keys:
+            keys.add(f"id|{source_key}|{normalized_job_id}")
 
     url_key = canonical_job_url(job_url)
     if url_key:
-        keys.add(f"url|{source_key}|{url_key}")
+        for source_key in source_keys:
+            keys.add(f"url|{source_key}|{url_key}")
 
     url_job_id = job_id_from_url(job_url)
     if url_job_id:
-        keys.add(f"id|{source_key}|{url_job_id}")
+        for source_key in source_keys:
+            keys.add(f"id|{source_key}|{url_job_id}")
+
+    external_apply_key = dedupe_normalize.canonical_external_apply_url(apply_url)
+    if external_apply_key:
+        keys.add(f"apply|{external_apply_key}")
 
     title_key = normalize_identity_value(title)
     company_key = normalize_identity_value(company)
     location_key = normalize_identity_value(location)
     if title_key and company_key and location_key:
-        keys.add(f"profile|{source_key}|{title_key}|{company_key}|{location_key}")
+        for source_key in source_keys:
+            keys.add(
+                f"profile|{source_key}|{title_key}|{company_key}|{location_key}"
+            )
+        profile_key = source_agnostic_profile_key(title, company, location)
+        if profile_key:
+            keys.add(profile_key)
 
     return keys
 
@@ -270,7 +328,7 @@ def job_identity_keys(settings: ScraperSettings, job: dict[str, Any]) -> set[str
         or job.get("id")
         or ""
     )
-    return job_identity_keys_from_values(
+    keys = job_identity_keys_from_values(
         source=get_source_label(job),
         title=get_title(job),
         company=get_company(job),
@@ -278,6 +336,23 @@ def job_identity_keys(settings: ScraperSettings, job: dict[str, Any]) -> set[str
         job_url=get_job_url(settings, job),
         job_id=job_id,
     )
+    provenance = job.get("_jobfinder_provenance", [])
+    if isinstance(provenance, list):
+        for item in provenance:
+            if not isinstance(item, dict):
+                continue
+            keys.update(
+                job_identity_keys_from_values(
+                    source=item.get("label") or item.get("source") or "",
+                    title=item.get("title") or get_title(job),
+                    company=item.get("company") or get_company(job),
+                    location=item.get("location") or get_location(job),
+                    job_url=item.get("job_url") or "",
+                    job_id=item.get("job_id") or "",
+                    apply_url=item.get("apply_url") or "",
+                )
+            )
+    return keys
 
 
 def remove_jobs_seen_in_history(
@@ -358,7 +433,12 @@ def read_seen_jobs_index(service: Any, spreadsheet_id: str) -> set[str]:
         .execute()
     )
     values = response.get("values", [])
-    return {str(row[0]).strip() for row in values if row and str(row[0]).strip()}
+    keys: set[str] = set()
+    for row in values:
+        if not row or not str(row[0]).strip():
+            continue
+        keys.update(expand_historical_job_key(str(row[0]).strip()))
+    return keys
 
 
 def ensure_seen_jobs_index_sheet(
@@ -491,6 +571,7 @@ def read_historical_google_job_keys(
                     company=row.get("Company", ""),
                     location=row.get("Location", ""),
                     job_url=row.get("Job URL", ""),
+                    apply_url=row.get("Apply URL", ""),
                 )
             )
 

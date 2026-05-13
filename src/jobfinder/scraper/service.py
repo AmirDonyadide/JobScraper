@@ -7,6 +7,7 @@ import time
 from dataclasses import dataclass
 from typing import Any
 
+from jobfinder.dedupe.matching import deduplicate_search_results
 from jobfinder.scraper.export_excel import export_to_excel
 from jobfinder.scraper.export_google_sheets import (
     build_scraper_google_sheets_service,
@@ -17,7 +18,7 @@ from jobfinder.scraper.filters import (
     filter_excluded_companies,
     filter_excluded_titles,
 )
-from jobfinder.scraper.normalize import get_posted, merge_and_deduplicate
+from jobfinder.scraper.normalize import get_posted
 from jobfinder.scraper.run_history import (
     GoogleSpreadsheetContext,
     apply_configured_posted_time_window,
@@ -218,8 +219,16 @@ def run_scrape(settings: ScraperSettings) -> ScrapeResult:
     )
 
     LOGGER.info("Deduplicating results.")
-    unique_jobs = merge_and_deduplicate(all_results)
-    LOGGER.info("%s unique job(s) after deduplication.", len(unique_jobs))
+    dedupe_result = deduplicate_search_results(
+        all_results,
+        include_debug=LOGGER.isEnabledFor(logging.DEBUG),
+    )
+    unique_jobs = dedupe_result.jobs
+    LOGGER.info(
+        "%s unique job(s) after deduplication (%s scraped row(s) collapsed).",
+        len(unique_jobs),
+        dedupe_result.input_count - dedupe_result.output_count,
+    )
 
     LOGGER.info("Applying title filters.")
     unique_jobs, excluded_title_count = filter_excluded_titles(settings, unique_jobs)

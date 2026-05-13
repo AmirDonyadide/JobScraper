@@ -8,6 +8,7 @@ import re
 from datetime import UTC, datetime
 from typing import Any
 
+from jobfinder.dedupe.matching import deduplicate_search_results
 from jobfinder.scraper.search import indeed_base_url
 from jobfinder.scraper.settings import ScraperSettings
 
@@ -478,17 +479,5 @@ def make_dedup_key(job: dict[str, Any]) -> str:
 def merge_and_deduplicate(
     all_results: list[tuple[str, list[dict[str, Any]]]],
 ) -> list[dict[str, Any]]:
-    """Merge search results and collect all matched keywords per unique job."""
-    seen: dict[str, dict[str, Any]] = {}
-
-    for keyword, jobs in all_results:
-        for job in jobs:
-            key = make_dedup_key(job)
-            if key in seen:
-                seen[key]["keywords_matched"].append(keyword)
-            else:
-                job_copy = dict(job)
-                job_copy["keywords_matched"] = [keyword]
-                seen[key] = job_copy
-
-    return list(seen.values())
+    """Merge search results with the production cross-provider dedupe pipeline."""
+    return deduplicate_search_results(all_results).jobs
