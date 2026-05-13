@@ -65,7 +65,7 @@ class ApifyTransientError(RuntimeError):
 def apify_headers(
     settings: ScraperSettings,
     token: ApifyTokenSelection | str | None = None,
-) -> dict[str, str]:
+) -> dict[str, str | bytes]:
     """Build authorization headers for Apify API calls."""
     return {"Authorization": f"Bearer {apify_token_value(settings, token)}"}
 
