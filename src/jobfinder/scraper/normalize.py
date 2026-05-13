@@ -53,6 +53,10 @@ POSTED_KEYS = (
     "posted_at",
     "publishedAt",
     "published_at",
+    "datePublished",
+    "date_published",
+    "dateOnIndeed",
+    "date_on_indeed",
     "datePosted",
     "date_posted",
     "posted",
@@ -148,9 +152,10 @@ def get_title(job: dict[str, Any]) -> str:
 def get_company(job: dict[str, Any]) -> str:
     """Return a normalized company name."""
     company = field(job, "companyName", "company", "organization", "jobSourceName")
+    employer = nested(job, "employer", "name")
     if "companyDetails" not in job:
-        return company
-    return first_value(nested(job, "companyDetails", "name"), company)
+        return first_value(employer, company)
+    return first_value(nested(job, "companyDetails", "name"), employer, company)
 
 
 def get_location(job: dict[str, Any]) -> str:
@@ -158,23 +163,41 @@ def get_location(job: dict[str, Any]) -> str:
     if isinstance(job.get("location"), dict):
         return first_value(
             nested(job, "location", "formatted", "long"),
+            nested(job, "location", "formatted"),
             nested(job, "location", "fullAddress"),
             nested(job, "location", "city"),
+            ", ".join(
+                part
+                for part in (
+                    nested(job, "location", "admin1Code"),
+                    nested(job, "location", "countryName"),
+                )
+                if part != "N/A"
+            ),
         )
     return field(job, "location", "formattedLocation", "jobLocation", "place")
 
 
 def get_job_url(settings: ScraperSettings, job: dict[str, Any]) -> str:
     """Return the best available public job URL."""
-    url = (
-        job.get("jobUrl")
-        or job.get("job_url")
-        or job.get("linkedinUrl")
-        or job.get("linkedin_url")
-        or job.get("url")
-        or job.get("link")
-        or ""
-    )
+    if job.get("_source") == "indeed":
+        url = (
+            job.get("url")
+            or job.get("link")
+            or job.get("jobUrl")
+            or job.get("job_url")
+            or ""
+        )
+    else:
+        url = (
+            job.get("jobUrl")
+            or job.get("job_url")
+            or job.get("linkedinUrl")
+            or job.get("linkedin_url")
+            or job.get("url")
+            or job.get("link")
+            or ""
+        )
     if url:
         return str(url)
 
@@ -431,7 +454,15 @@ def format_posted_value(settings: ScraperSettings, value: Any) -> str:
 def make_dedup_key(job: dict[str, Any]) -> str:
     """Build a stable deduplication key for a normalized job."""
     source = str(job.get("_source") or "unknown").lower().strip()
-    job_id = job.get("jobId") or job.get("job_id") or job.get("id") or ""
+    job_id = (
+        job.get("jobId")
+        or job.get("job_id")
+        or job.get("indeedKey")
+        or job.get("key")
+        or job.get("jobKey")
+        or job.get("id")
+        or ""
+    )
     if job_id:
         return f"{source}|{str(job_id).strip()}"
 

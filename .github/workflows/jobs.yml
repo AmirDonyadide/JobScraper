@@ -12,6 +12,26 @@ on:
           - linkedin
           - indeed
           - both
+      posted_time_window:
+        description: "Provider posted-time window"
+        required: true
+        default: "since_previous_run"
+        type: choice
+        options:
+          - since_previous_run
+          - last_24h
+          - last_7d
+          - backfill
+      max_applicants:
+        description: "Maximum applicants per job"
+        required: true
+        default: "100"
+        type: choice
+        options:
+          - "50"
+          - "100"
+          - "200"
+          - no_limit
       run_mode:
         description: "Pipeline mode"
         required: true
@@ -58,6 +78,8 @@ jobs:
       JOBSCRAPER_OUTPUT_MODE: "google_sheets"
       JOBSCRAPER_SOURCES: ${{ github.event.inputs.sources || 'linkedin' }}
       JOBFINDER_PIPELINE_MODE: ${{ github.event.inputs.run_mode || 'scrape_and_evaluate' }}
+      JOBSCRAPER_POSTED_TIME_WINDOW: ${{ github.event.inputs.posted_time_window || 'since_previous_run' }}
+      JOBSCRAPER_MAX_APPLICANTS: ${{ github.event.inputs.max_applicants == 'no_limit' && '0' || github.event.inputs.max_applicants || '100' }}
       JOBSCRAPER_SEARCH_CONCURRENCY: "15"
       JOBSCRAPER_SEARCH_WINDOW_BUFFER_SECONDS: "3600"
       APIFY_RUN_MEMORY_MB: "512"
@@ -230,6 +252,12 @@ jobs:
           echo "Output mode: ${JOBSCRAPER_OUTPUT_MODE}"
           echo "Pipeline mode: ${JOBFINDER_PIPELINE_MODE}"
           echo "Job sources: ${JOBSCRAPER_SOURCES}"
+          echo "Posted-time window: ${JOBSCRAPER_POSTED_TIME_WINDOW}"
+          if [ "${JOBSCRAPER_MAX_APPLICANTS}" = "0" ]; then
+            echo "Max applicants/job: no limit"
+          else
+            echo "Max applicants/job: ${JOBSCRAPER_MAX_APPLICANTS}"
+          fi
           echo "Scraper timezone: ${JOBSCRAPER_TIMEZONE}"
           echo "Posted timezone: ${JOBSCRAPER_POSTED_TIMEZONE}"
           echo "Search concurrency: ${JOBSCRAPER_SEARCH_CONCURRENCY}"
@@ -252,6 +280,8 @@ jobs:
             echo "- Status: $([ "$status" -eq 0 ] && echo succeeded || echo failed)"
             echo "- Pipeline mode: ${JOBFINDER_PIPELINE_MODE}"
             echo "- Job sources: ${JOBSCRAPER_SOURCES}"
+            echo "- Posted-time window: ${JOBSCRAPER_POSTED_TIME_WINDOW}"
+            echo "- Max applicants/job: $([ "${JOBSCRAPER_MAX_APPLICANTS}" = "0" ] && echo "no limit" || echo "${JOBSCRAPER_MAX_APPLICANTS}")"
             echo "- Unsuitable row policy: ${JOB_EVAL_UNSUITABLE_ROW_POLICY}"
             echo "- Started at: $(date +'%Y-%m-%dT%H:%M:%S%z')"
             echo "- GitHub run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"

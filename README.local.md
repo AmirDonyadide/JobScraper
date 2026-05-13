@@ -120,7 +120,9 @@ Common settings:
 | `JOBSCRAPER_APIFY_MEMORY_LIMIT_MB` | `0` | Optional total Apify memory cap used to reduce search concurrency; `0` disables the cap. |
 | `JOBSCRAPER_APIFY_BATCH_SIZE` | `1` | Optional LinkedIn search batch size. Keep `1` unless actor results expose source search URLs for attribution. |
 | `JOBSCRAPER_MAX_RESULTS_PER_SEARCH` | `500` | Maximum LinkedIn results per keyword. |
+| `JOBSCRAPER_POSTED_TIME_WINDOW` | `since_previous_run` | Use `since_previous_run`, `last_24h`, `last_7d`, or `backfill` to control provider posted-time filters. LinkedIn uses second-based windows; Indeed uses the closest supported actor day bucket when possible. |
 | `JOBSCRAPER_SEARCH_WINDOW_BUFFER_SECONDS` | `3600` | Extra search-window padding before exact posted-time filtering, to avoid missing jobs while the run is starting. |
+| `JOBSCRAPER_MAX_APPLICANTS` | `100` | Maximum applicants per job after scraping. Use `0` for no limit. |
 | `APIFY_RUN_MEMORY_MB` | `512` | Memory assigned to each Apify actor run. |
 | `APIFY_RUN_TIMEOUT_SECONDS` | `3600` | Maximum Apify actor runtime per keyword search. |
 | `APIFY_CLIENT_TIMEOUT_SECONDS` | `120` | HTTP timeout for individual Apify API calls while starting, polling, and reading results. |
@@ -131,8 +133,8 @@ Common settings:
 | `GOOGLE_SPREADSHEET_ID` | blank | Optional locally. You can also save the ID in `google_spreadsheet_id.txt`. |
 | `INDEED_COUNTRY` | `DE` | Indeed country code when `JOBSCRAPER_SOURCES` is `indeed` or `both`. |
 | `INDEED_LOCATION` | `Germany` | Indeed location when `JOBSCRAPER_SOURCES` is `indeed` or `both`. |
-| `INDEED_MAX_RESULTS_PER_SEARCH` | `500` | Maximum Indeed results per keyword. |
-| `INDEED_MAX_CONCURRENCY` | `5` | Number of Indeed actor searches run at the same time. |
+| `INDEED_MAX_RESULTS_PER_SEARCH` | `500` | Maximum Indeed results per keyword, capped at the actor limit of 1000. |
+| `INDEED_MAX_CONCURRENCY` | `5` | Maximum Indeed actor searches run at the same time. |
 | `JOB_EVAL_SOURCE` | blank | Use `excel` or `google_sheets`; blank auto-selects Google Sheets when a spreadsheet ID exists, otherwise Excel. |
 | `JOB_EVAL_SHEET` | `latest` | Worksheet or Google Sheet tab to evaluate. |
 | `JOB_EVAL_OPENAI_MODEL` | `gpt-5-mini` | OpenAI model used for evaluation. |

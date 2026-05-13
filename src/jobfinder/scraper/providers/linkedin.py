@@ -14,12 +14,14 @@ def build_search_url(settings: ScraperSettings, keyword: str) -> str:
         "keywords": keyword,
         "location": settings.location,
         "geoId": settings.geo_id,
-        "f_TPR": settings.published_at,
         "f_E": ",".join(settings.experience_levels),
         "f_JT": ",".join(settings.contract_types),
         "position": "1",
         "pageNum": "0",
     }
+    if settings.published_at:
+        params["f_TPR"] = settings.published_at
+
     return f"https://www.linkedin.com/jobs/search/?{urlencode(params)}"
 
 

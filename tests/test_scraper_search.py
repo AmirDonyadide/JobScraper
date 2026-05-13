@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import threading
+import time
 from types import SimpleNamespace
 from typing import Any
 
@@ -55,6 +57,7 @@ def make_settings() -> SimpleNamespace:
         use_incognito_mode=True,
         split_by_location=False,
         split_country="DE",
+        indeed_max_concurrency=5,
     )
 
 
@@ -255,6 +258,50 @@ def test_run_all_searches_batches_linkedin_when_results_are_attributable(monkeyp
         "GIS Analyst",
         "Python Analyst",
     ]
+    assert zero_searches == []
+    assert failed_sources == {}
+    assert skipped_searches == []
+
+
+def test_run_all_searches_respects_indeed_source_concurrency(monkeypatch):
+    """Indeed actor runs should be bounded separately from global concurrency."""
+    settings = make_settings()
+    settings.search_concurrency = 6
+    settings.indeed_max_concurrency = 2
+    active_count = 0
+    max_active_count = 0
+    lock = threading.Lock()
+
+    def fake_run_actor(settings, actor_id, payload, max_items):
+        nonlocal active_count, max_active_count
+        with lock:
+            active_count += 1
+            max_active_count = max(max_active_count, active_count)
+        time.sleep(0.02)
+        with lock:
+            active_count -= 1
+        return [{"title": payload["title"], "key": payload["title"]}]
+
+    monkeypatch.setattr("jobfinder.scraper.search.run_actor", fake_run_actor)
+
+    results, zero_searches, failed_sources, skipped_searches = run_all_searches(
+        settings,
+        [
+            SearchRequest(
+                source="indeed",
+                source_label="Indeed",
+                keyword=f"Keyword {idx}",
+                display_label=f"Indeed / Keyword {idx}",
+                actor_id="valig~indeed-jobs-scraper",
+                payload={"title": f"Keyword {idx}"},
+                max_items=500,
+            )
+            for idx in range(6)
+        ],
+    )
+
+    assert max_active_count <= 2
+    assert [keyword for keyword, _ in results] == [f"Keyword {idx}" for idx in range(6)]
     assert zero_searches == []
     assert failed_sources == {}
     assert skipped_searches == []

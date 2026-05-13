@@ -34,7 +34,8 @@ DEFAULT_APIFY_TRANSIENT_ERROR_RETRIES = 5
 DEFAULT_APIFY_RETRY_DELAY_SECONDS = 30
 
 LINKEDIN_ACTOR_ID = "curious_coder~linkedin-jobs-scraper"
-INDEED_ACTOR_ID = "misceres~indeed-scraper"
+INDEED_ACTOR_ID = "valig~indeed-jobs-scraper"
+INDEED_MAX_RESULTS_LIMIT = 1000
 
 SOURCE_ORDER = ("linkedin", "indeed")
 SOURCE_DISPLAY_NAMES = {
@@ -58,6 +59,27 @@ OUTPUT_MODE_ALIASES = {
     "sheets": {"google_sheets"},
     "both": {"excel", "google_sheets"},
     "all": {"excel", "google_sheets"},
+}
+POSTED_TIME_WINDOW_SINCE_PREVIOUS_RUN = "since_previous_run"
+POSTED_TIME_WINDOW_LAST_24H = "last_24h"
+POSTED_TIME_WINDOW_LAST_7D = "last_7d"
+POSTED_TIME_WINDOW_BACKFILL = "backfill"
+POSTED_TIME_WINDOW_ALIASES = {
+    "since_previous_run": POSTED_TIME_WINDOW_SINCE_PREVIOUS_RUN,
+    "since-previous-run": POSTED_TIME_WINDOW_SINCE_PREVIOUS_RUN,
+    "previous_run": POSTED_TIME_WINDOW_SINCE_PREVIOUS_RUN,
+    "previous-run": POSTED_TIME_WINDOW_SINCE_PREVIOUS_RUN,
+    "daily": POSTED_TIME_WINDOW_SINCE_PREVIOUS_RUN,
+    "last_24h": POSTED_TIME_WINDOW_LAST_24H,
+    "last-24h": POSTED_TIME_WINDOW_LAST_24H,
+    "24h": POSTED_TIME_WINDOW_LAST_24H,
+    "last_7d": POSTED_TIME_WINDOW_LAST_7D,
+    "last-7d": POSTED_TIME_WINDOW_LAST_7D,
+    "7d": POSTED_TIME_WINDOW_LAST_7D,
+    "backfill": POSTED_TIME_WINDOW_BACKFILL,
+    "all": POSTED_TIME_WINDOW_BACKFILL,
+    "all_time": POSTED_TIME_WINDOW_BACKFILL,
+    "all-time": POSTED_TIME_WINDOW_BACKFILL,
 }
 
 DEFAULT_EXCLUDED_COMPANY_TERMS = [
@@ -106,6 +128,7 @@ class ScraperSettings:
     apify_retry_delay_seconds: int
     delay_between_requests: int
     search_window_buffer_seconds: int
+    posted_time_window: str
     location: str
     geo_id: str
     published_at: str
@@ -158,9 +181,12 @@ def load_scraper_settings(env: EnvSettings | None = None) -> ScraperSettings:
         1,
         env.get_int("JOBSCRAPER_MAX_RESULTS_PER_SEARCH", 500),
     )
-    indeed_max_results = max(
-        1,
-        env.get_int("INDEED_MAX_RESULTS_PER_SEARCH", max_results_per_search),
+    indeed_max_results = min(
+        INDEED_MAX_RESULTS_LIMIT,
+        max(
+            1,
+            env.get_int("INDEED_MAX_RESULTS_PER_SEARCH", max_results_per_search),
+        ),
     )
     apify_run_timeout_seconds = max(
         60,
@@ -231,6 +257,9 @@ def load_scraper_settings(env: EnvSettings | None = None) -> ScraperSettings:
         search_window_buffer_seconds=max(
             0, env.get_int("JOBSCRAPER_SEARCH_WINDOW_BUFFER_SECONDS", 3600)
         ),
+        posted_time_window=parse_posted_time_window(
+            env.get("JOBSCRAPER_POSTED_TIME_WINDOW")
+        ),
         location=location,
         geo_id=config_str(filter_config, "linkedin_search", "geo_id", "101282230"),
         published_at=config_str(
@@ -283,6 +312,29 @@ def load_scraper_settings(env: EnvSettings | None = None) -> ScraperSettings:
             "linkedin": max_results_per_search,
             "indeed": indeed_max_results,
         },
+    )
+
+
+def parse_posted_time_window(value: str | None) -> str:
+    """Resolve the selected posted-time window for scraper runs."""
+    normalized = (value or POSTED_TIME_WINDOW_SINCE_PREVIOUS_RUN).strip().casefold()
+    if not normalized:
+        return POSTED_TIME_WINDOW_SINCE_PREVIOUS_RUN
+
+    window = POSTED_TIME_WINDOW_ALIASES.get(normalized)
+    if window:
+        return window
+
+    allowed = ", ".join(
+        [
+            POSTED_TIME_WINDOW_SINCE_PREVIOUS_RUN,
+            POSTED_TIME_WINDOW_LAST_24H,
+            POSTED_TIME_WINDOW_LAST_7D,
+            POSTED_TIME_WINDOW_BACKFILL,
+        ]
+    )
+    raise RuntimeError(
+        f"Unsupported JOBSCRAPER_POSTED_TIME_WINDOW {value!r}. Use one of: {allowed}."
     )
 
 

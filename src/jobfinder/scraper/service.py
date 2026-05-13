@@ -20,7 +20,7 @@ from jobfinder.scraper.filters import (
 from jobfinder.scraper.normalize import get_posted, merge_and_deduplicate
 from jobfinder.scraper.run_history import (
     GoogleSpreadsheetContext,
-    apply_previous_run_search_window,
+    apply_configured_posted_time_window,
     filter_jobs_to_previous_run_window,
     load_google_spreadsheet_context,
     remove_jobs_seen_in_history,
@@ -106,9 +106,11 @@ def run_scrape(settings: ScraperSettings) -> ScrapeResult:
         )
         LOGGER.info("Google Sheets access is ready.")
 
-    settings, linkedin_window_seconds = apply_previous_run_search_window(
-        settings,
-        google_context.previous_run_started_at,
+    settings, posted_window_seconds, filter_to_previous_run_window = (
+        apply_configured_posted_time_window(
+            settings,
+            google_context.previous_run_started_at,
+        )
     )
 
     job_sources = parse_job_sources(settings)
@@ -133,19 +135,23 @@ def run_scrape(settings: ScraperSettings) -> ScrapeResult:
     LOGGER.info("Output mode: %s.", ", ".join(sorted(output_modes)))
     LOGGER.info("Timezone: %s.", settings.scraper_timezone)
     LOGGER.info("Posted timezone: %s.", settings.posted_timezone)
+    LOGGER.info("Posted-time window: %s.", settings.posted_time_window)
     if google_context.previous_run_started_at:
         LOGGER.info(
             "Previous Google Sheets run: %s.",
             google_context.previous_run_started_at.strftime("%Y-%m-%d %H:%M:%S %Z"),
         )
-    if linkedin_window_seconds and "linkedin" in job_sources:
+    if posted_window_seconds:
         LOGGER.info(
-            "LinkedIn posted search window: %s second(s).",
-            linkedin_window_seconds,
+            "Provider posted search window: %s second(s).",
+            posted_window_seconds,
         )
     LOGGER.info("Searches: %s.", len(searches))
     LOGGER.info("Search concurrency: %s.", settings.search_concurrency)
-    LOGGER.info("Max applicants/job: %s.", settings.max_applicants)
+    if settings.max_applicants > 0:
+        LOGGER.info("Max applicants/job: %s.", settings.max_applicants)
+    else:
+        LOGGER.info("Max applicants/job: no limit.")
     LOGGER.info("Apify child run memory: %s MB.", settings.apify_run_memory_mb)
     LOGGER.info("Apify child run timeout: %ss.", settings.apify_run_timeout_seconds)
     LOGGER.info(
@@ -221,13 +227,16 @@ def run_scrape(settings: ScraperSettings) -> ScrapeResult:
     unique_jobs, excluded_applicant_count = filter_applicant_count(
         settings, unique_jobs
     )
-    LOGGER.info(
-        "Removed %s job(s) with more than %s applicant(s).",
-        excluded_applicant_count,
-        settings.max_applicants,
-    )
+    if settings.max_applicants > 0:
+        LOGGER.info(
+            "Removed %s job(s) with more than %s applicant(s).",
+            excluded_applicant_count,
+            settings.max_applicants,
+        )
+    else:
+        LOGGER.info("Applicant count filter disabled.")
 
-    if google_context.previous_run_started_at:
+    if filter_to_previous_run_window:
         LOGGER.info("Filtering jobs to the exact previous-run posted window.")
         unique_jobs, outside_window_count, unknown_posted_count = (
             filter_jobs_to_previous_run_window(

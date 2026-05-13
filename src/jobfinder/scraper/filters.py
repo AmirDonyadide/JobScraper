@@ -57,6 +57,9 @@ def filter_excluded_companies(
 
 def has_too_many_applicants(settings: ScraperSettings, job: dict[str, Any]) -> bool:
     """Return true when the parsed applicant count exceeds the configured cap."""
+    if settings.max_applicants <= 0:
+        return False
+
     applicant_count = get_applicant_count(job)
     return applicant_count is not None and applicant_count > settings.max_applicants
 

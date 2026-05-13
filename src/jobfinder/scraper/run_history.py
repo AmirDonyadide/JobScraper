@@ -19,7 +19,13 @@ from jobfinder.scraper.normalize import (
     get_source_label,
     get_title,
 )
-from jobfinder.scraper.settings import ScraperSettings
+from jobfinder.scraper.settings import (
+    POSTED_TIME_WINDOW_BACKFILL,
+    POSTED_TIME_WINDOW_LAST_7D,
+    POSTED_TIME_WINDOW_LAST_24H,
+    POSTED_TIME_WINDOW_SINCE_PREVIOUS_RUN,
+    ScraperSettings,
+)
 
 RUN_SHEET_NAME_RE = re.compile(
     r"^(?P<timestamp>\d{4}-\d{2}-\d{2} \d{2}-\d{2}-\d{2})(?: \(\d+\))?$"
@@ -78,7 +84,7 @@ def apply_previous_run_search_window(
     settings: ScraperSettings,
     previous_run_started_at: datetime | None,
 ) -> tuple[ScraperSettings, int | None]:
-    """Use the previous run timestamp to build a broad LinkedIn posted window."""
+    """Use the previous run timestamp to build a broad provider posted window."""
     if previous_run_started_at is None:
         return settings, None
 
@@ -93,6 +99,30 @@ def apply_previous_run_search_window(
 
     search_seconds = max(1, elapsed_seconds + settings.search_window_buffer_seconds)
     return replace(settings, published_at=f"r{search_seconds}"), search_seconds
+
+
+def apply_configured_posted_time_window(
+    settings: ScraperSettings,
+    previous_run_started_at: datetime | None,
+) -> tuple[ScraperSettings, int | None, bool]:
+    """Apply the selected posted-time window before building provider searches."""
+    if settings.posted_time_window == POSTED_TIME_WINDOW_SINCE_PREVIOUS_RUN:
+        updated, search_seconds = apply_previous_run_search_window(
+            settings,
+            previous_run_started_at,
+        )
+        return updated, search_seconds, previous_run_started_at is not None
+
+    if settings.posted_time_window == POSTED_TIME_WINDOW_LAST_24H:
+        return replace(settings, published_at="r86400"), 24 * 60 * 60, False
+
+    if settings.posted_time_window == POSTED_TIME_WINDOW_LAST_7D:
+        return replace(settings, published_at="r604800"), 7 * 24 * 60 * 60, False
+
+    if settings.posted_time_window == POSTED_TIME_WINDOW_BACKFILL:
+        return replace(settings, published_at=""), None, False
+
+    return settings, None, False
 
 
 def filter_jobs_to_previous_run_window(
@@ -219,7 +249,15 @@ def job_identity_keys_from_values(
 
 def job_identity_keys(settings: ScraperSettings, job: dict[str, Any]) -> set[str]:
     """Build duplicate keys for one raw scraped job."""
-    job_id = job.get("jobId") or job.get("job_id") or job.get("id") or ""
+    job_id = (
+        job.get("jobId")
+        or job.get("job_id")
+        or job.get("indeedKey")
+        or job.get("key")
+        or job.get("jobKey")
+        or job.get("id")
+        or ""
+    )
     return job_identity_keys_from_values(
         source=get_source_label(job),
         title=get_title(job),

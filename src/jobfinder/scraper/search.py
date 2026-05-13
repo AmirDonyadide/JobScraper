@@ -10,7 +10,8 @@ from typing import Any
 
 import requests
 
-from jobfinder.scraper.providers import indeed, linkedin
+from jobfinder.providers import indeed
+from jobfinder.scraper.providers import linkedin
 from jobfinder.scraper.providers.apify_client import (
     ApifyConfigurationError,
     ApifyRunError,
@@ -321,12 +322,7 @@ def fetch_jobs_for_search(
     total_attempts = settings.apify_transient_error_retries + 1
     for attempt in range(1, total_attempts + 1):
         try:
-            jobs = run_actor(
-                settings,
-                search.actor_id,
-                search.payload,
-                search.max_items,
-            )
+            jobs = run_provider_actor(settings, search)
             return annotate_jobs(jobs, search.source, search.source_label)
         except ApifyConfigurationError:
             raise
@@ -367,6 +363,35 @@ def fetch_jobs_for_search(
     raise SearchExecutionError(f"Search {label!r} ended without a result.")
 
 
+def run_provider_actor(
+    settings: ScraperSettings,
+    search: SearchRequest,
+) -> list[dict[str, Any]]:
+    """Run a provider search through the correct actor adapter."""
+    if search.source == "indeed":
+        return indeed.run_actor_search(
+            settings,
+            search.actor_id,
+            search.payload,
+            search.max_items,
+            actor_runner=run_actor,
+        )
+
+    return run_actor(
+        settings,
+        search.actor_id,
+        search.payload,
+        search.max_items,
+    )
+
+
+def source_concurrency_limit(settings: ScraperSettings, source: str) -> int:
+    """Return the source-specific execution limit for actor runs."""
+    if source == "indeed":
+        return max(1, settings.indeed_max_concurrency)
+    return max(1, settings.search_concurrency)
+
+
 def run_all_searches(
     settings: ScraperSettings,
     searches: list[SearchRequest],
@@ -381,6 +406,8 @@ def run_all_searches(
     search_batches = build_search_batches(settings, searches)
     max_workers = min(settings.search_concurrency, len(search_batches))
     submitted_count = 0
+    in_flight_by_source: dict[str, int] = {}
+    next_batch_idx = 0
 
     LOGGER.info(
         "Running up to %s search execution unit(s) in parallel.",
@@ -389,18 +416,19 @@ def run_all_searches(
 
     def submit_next(
         executor: ThreadPoolExecutor,
-        search_iter: Any,
         in_flight: dict[Any, SearchBatch],
     ) -> None:
         """Submit searches until the concurrency window is full."""
-        nonlocal submitted_count
-        while len(in_flight) < max_workers:
-            try:
-                batch = next(search_iter)
-            except StopIteration:
+        nonlocal next_batch_idx, submitted_count
+        while len(in_flight) < max_workers and next_batch_idx < len(search_batches):
+            batch = search_batches[next_batch_idx]
+
+            source_limit = source_concurrency_limit(settings, batch.source)
+            if in_flight_by_source.get(batch.source, 0) >= source_limit:
                 return
 
             label = batch.display_label
+            next_batch_idx += 1
             if batch.source in failed_sources:
                 for idx, search in batch.searches:
                     LOGGER.info(
@@ -425,17 +453,22 @@ def run_all_searches(
             )
             future = executor.submit(fetch_jobs_for_batch, settings, batch)
             in_flight[future] = batch
+            in_flight_by_source[batch.source] = (
+                in_flight_by_source.get(batch.source, 0) + 1
+            )
             submitted_count += 1
-
-    search_iter = iter(search_batches)
 
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         in_flight: dict[Any, SearchBatch] = {}
-        submit_next(executor, search_iter, in_flight)
+        submit_next(executor, in_flight)
 
         while in_flight:
             for future in as_completed(tuple(in_flight)):
                 batch = in_flight.pop(future)
+                in_flight_by_source[batch.source] = max(
+                    0,
+                    in_flight_by_source.get(batch.source, 1) - 1,
+                )
 
                 try:
                     batch_results = future.result()
@@ -474,7 +507,7 @@ def run_all_searches(
                             )
                             zero_searches.append(search.display_label)
 
-                submit_next(executor, search_iter, in_flight)
+                submit_next(executor, in_flight)
                 break
 
     ordered_results = [

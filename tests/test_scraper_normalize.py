@@ -35,3 +35,16 @@ def test_merge_and_deduplicate_collects_all_matched_keywords():
 
     assert len(merged) == 1
     assert merged[0]["keywords_matched"] == ["GIS", "Python"]
+
+
+def test_merge_and_deduplicate_uses_indeed_actor_key():
+    """New Indeed actor keys should behave like source-native job IDs."""
+    jobs = [
+        ("GIS", [{"_source": "indeed", "key": "abc123", "title": "Analyst"}]),
+        ("Python", [{"_source": "indeed", "key": "abc123", "title": "Analyst"}]),
+    ]
+
+    merged = merge_and_deduplicate(jobs)
+
+    assert len(merged) == 1
+    assert merged[0]["keywords_matched"] == ["GIS", "Python"]

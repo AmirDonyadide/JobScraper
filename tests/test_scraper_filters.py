@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from jobfinder.scraper.filters import filter_excluded_companies
+from jobfinder.scraper.filters import filter_applicant_count, filter_excluded_companies
 
 
 def test_filter_excluded_companies_matches_case_insensitive_substrings():
@@ -48,3 +48,17 @@ def test_filter_excluded_companies_matches_punctuation_variants():
 
     assert [job["companyName"] for job in kept] == ["Open Systems GmbH"]
     assert excluded_count == 2
+
+
+def test_filter_applicant_count_zero_disables_limit():
+    """A zero applicant cap is used by the workflow's no-limit option."""
+    settings = SimpleNamespace(max_applicants=0)
+    jobs = [
+        {"title": "Busy role", "applicantsCount": 500},
+        {"title": "Quiet role", "applicantsCount": 1},
+    ]
+
+    kept, excluded_count = filter_applicant_count(settings, jobs)
+
+    assert kept == jobs
+    assert excluded_count == 0

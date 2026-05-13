@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -9,6 +10,7 @@ from zoneinfo import ZoneInfo
 from jobfinder.env import EnvSettings
 from jobfinder.scraper.run_history import (
     SEEN_JOBS_SHEET_NAME,
+    apply_configured_posted_time_window,
     apply_previous_run_search_window,
     filter_jobs_to_previous_run_window,
     find_previous_run_started_at,
@@ -50,6 +52,7 @@ def make_settings(run_started_at: datetime) -> ScraperSettings:
         apify_retry_delay_seconds=30,
         delay_between_requests=0,
         search_window_buffer_seconds=3600,
+        posted_time_window="since_previous_run",
         location="Germany",
         geo_id="101282230",
         published_at="r86400",
@@ -101,6 +104,43 @@ def test_apply_previous_run_search_window_adds_safety_buffer():
 
     assert seconds == 25 * 60 * 60 + 3600
     assert updated.published_at == f"r{seconds}"
+
+
+def test_apply_configured_posted_time_window_uses_fixed_manual_window():
+    """Manual fixed windows should not be narrowed to the previous-run interval."""
+    berlin = ZoneInfo("Europe/Berlin")
+    settings = replace(
+        make_settings(datetime(2026, 5, 6, 10, 0, tzinfo=berlin)),
+        posted_time_window="last_7d",
+    )
+    previous = datetime(2026, 5, 5, 9, 0, tzinfo=berlin)
+
+    updated, seconds, should_filter_previous = apply_configured_posted_time_window(
+        settings,
+        previous,
+    )
+
+    assert seconds == 7 * 24 * 60 * 60
+    assert updated.published_at == "r604800"
+    assert should_filter_previous is False
+
+
+def test_apply_configured_posted_time_window_can_backfill_without_provider_date():
+    """Backfill mode should leave provider searches unrestricted by posted date."""
+    berlin = ZoneInfo("Europe/Berlin")
+    settings = replace(
+        make_settings(datetime(2026, 5, 6, 10, 0, tzinfo=berlin)),
+        posted_time_window="backfill",
+    )
+
+    updated, seconds, should_filter_previous = apply_configured_posted_time_window(
+        settings,
+        datetime(2026, 5, 5, 9, 0, tzinfo=berlin),
+    )
+
+    assert seconds is None
+    assert updated.published_at == ""
+    assert should_filter_previous is False
 
 
 def test_filter_jobs_to_previous_run_window_keeps_exact_interval():
@@ -165,6 +205,40 @@ def test_remove_jobs_seen_in_history_matches_previous_hyperlink_formula():
     )
 
     assert [job["jobId"] for job in kept] == ["999999"]
+    assert duplicate_count == 1
+
+
+def test_remove_jobs_seen_in_history_uses_new_indeed_key():
+    """New Indeed actor keys should match the maintained seen-jobs index."""
+    berlin = ZoneInfo("Europe/Berlin")
+    settings = make_settings(datetime(2026, 5, 6, 10, 0, tzinfo=berlin))
+    historical_keys = {"id|indeed|abc123"}
+    jobs = [
+        {
+            "_source": "indeed",
+            "_source_label": "Indeed",
+            "key": "abc123",
+            "title": "Data Analyst",
+            "companyName": "Acme Data",
+            "location": "Berlin",
+        },
+        {
+            "_source": "indeed",
+            "_source_label": "Indeed",
+            "key": "xyz999",
+            "title": "GIS Analyst",
+            "companyName": "GeoCo",
+            "location": "Munich",
+        },
+    ]
+
+    kept, duplicate_count = remove_jobs_seen_in_history(
+        settings,
+        jobs,
+        historical_keys,
+    )
+
+    assert [job["key"] for job in kept] == ["xyz999"]
     assert duplicate_count == 1
 
 

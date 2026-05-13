@@ -67,7 +67,7 @@ The Python package is named `jobfinder` internally. The scraper component remain
 
 When Google Sheets output is enabled, JobFinder reads the existing timestamped tabs before scraping. The newest previous tab name is treated as the previous exact run time in `JOBSCRAPER_TIMEZONE`, which defaults to `Europe/Berlin`.
 
-LinkedIn searches then use a dynamic posted window from that previous run to the current run, plus `JOBSCRAPER_SEARCH_WINDOW_BUFFER_SECONDS` as safety padding. After scraping, JobFinder filters rows back to the exact previous-run/current-run posted interval, then removes jobs already present in older tabs before the evaluator runs.
+Provider searches then use the configured posted-time window. LinkedIn uses a dynamic second-based window from the previous run with `JOBSCRAPER_SEARCH_WINDOW_BUFFER_SECONDS` padding; Indeed uses the actor's supported day bucket when the window fits. After scraping, JobFinder filters rows back to the exact previous-run/current-run posted interval, then removes jobs already present in older tabs before the evaluator runs.
 
 Final scraper filters in `configs/filters.json` also remove jobs whose company names contain any `excluded_company_terms`, ignoring case and punctuation.
 

@@ -183,6 +183,20 @@ Choose the source:
 - `indeed`
 - `both`
 
+Choose the posted-time window:
+
+- `since_previous_run`: use the current daily behavior. Provider searches cover the time since the previous run where supported, with a safety buffer, and results are narrowed to the exact previous-run interval.
+- `last_24h`: scrape jobs posted in the last 24 hours.
+- `last_7d`: scrape jobs posted in the last 7 days.
+- `backfill`: scrape without a provider posted-time filter.
+
+Choose the maximum applicants per job:
+
+- `50`
+- `100`
+- `200`
+- `no_limit`
+
 Choose the pipeline mode:
 
 - `scrape_and_evaluate`: scrape jobs, then evaluate them with OpenAI.
@@ -214,8 +228,9 @@ GitHub may delay scheduled workflows slightly. That is normal.
 To change the schedule, edit the `cron` value in `.github/workflows/jobs.yml`,
 commit the change, and push it to GitHub.
 
-Scheduled runs always use `single_label_only`, so the final tab keeps
-`Not Suitable` rows only when they have exactly one unsuitable-reason label.
+Scheduled runs keep the existing defaults: `since_previous_run`, max applicants
+`100`, and `single_label_only`. The final tab keeps `Not Suitable` rows only
+when they have exactly one unsuitable-reason label.
 
 ## 8. Runtime Settings In GitHub Actions
 
@@ -225,6 +240,8 @@ The current workflow sets these runtime values in `.github/workflows/jobs.yml`:
 JOBSCRAPER_OUTPUT_MODE: "google_sheets"
 JOBSCRAPER_SOURCES: ${{ github.event.inputs.sources || 'linkedin' }}
 JOBFINDER_PIPELINE_MODE: ${{ github.event.inputs.run_mode || 'scrape_and_evaluate' }}
+JOBSCRAPER_POSTED_TIME_WINDOW: ${{ github.event.inputs.posted_time_window || 'since_previous_run' }}
+JOBSCRAPER_MAX_APPLICANTS: ${{ github.event.inputs.max_applicants == 'no_limit' && '0' || github.event.inputs.max_applicants || '100' }}
 JOBSCRAPER_SEARCH_CONCURRENCY: "15"
 JOBSCRAPER_SEARCH_WINDOW_BUFFER_SECONDS: "3600"
 APIFY_RUN_MEMORY_MB: "512"

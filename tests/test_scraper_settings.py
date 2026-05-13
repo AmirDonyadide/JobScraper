@@ -35,3 +35,39 @@ def test_load_scraper_settings_clamps_provider_payload_limits(monkeypatch):
     assert settings.search_concurrency == 2
     assert settings.apify_batch_size == 3
     assert settings.source_max_items == {"linkedin": 1, "indeed": 1}
+
+
+def test_load_scraper_settings_reads_manual_posted_time_window(monkeypatch):
+    """Workflow/manual runs should be able to override the posted-time window."""
+    monkeypatch.setattr("jobfinder.scraper.settings.load_filter_config", lambda _: {})
+    monkeypatch.setattr("jobfinder.scraper.settings.load_keywords", lambda _: ["GIS"])
+
+    settings = load_scraper_settings(
+        EnvSettings(
+            {
+                "APIFY_API_TOKEN": "apify_api_real_token",
+                "JOBSCRAPER_POSTED_TIME_WINDOW": "last_24h",
+            }
+        )
+    )
+
+    assert settings.posted_time_window == "last_24h"
+
+
+def test_load_scraper_settings_uses_new_indeed_actor_and_limit(monkeypatch):
+    """Indeed settings should target the new actor and respect its limit cap."""
+    monkeypatch.setattr("jobfinder.scraper.settings.load_filter_config", lambda _: {})
+    monkeypatch.setattr("jobfinder.scraper.settings.load_keywords", lambda _: ["GIS"])
+
+    settings = load_scraper_settings(
+        EnvSettings(
+            {
+                "APIFY_API_TOKEN": "apify_api_real_token",
+                "INDEED_MAX_RESULTS_PER_SEARCH": "1500",
+            }
+        )
+    )
+
+    assert settings.source_actor_ids["indeed"] == "valig~indeed-jobs-scraper"
+    assert settings.indeed_max_results_per_search == 1000
+    assert settings.source_max_items["indeed"] == 1000
